@@ -1,0 +1,25 @@
+{
+  "name": "cha-lang",
+  "version": "0.1.0",
+  "description": "Cha（茶）—— 用 TypeScript 从零手写的微型编程语言：词法器 → 解析器 → 树遍历求值器",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=cjs --outfile=dist/cha.cjs",
+    "repl": "tsx src/repl.ts",
+    "cha": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "esbuild": "0.25.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
+  }
+}
