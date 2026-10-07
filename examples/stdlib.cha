@@ -1,0 +1,24 @@
+// 标准库速览
+print(type(1), type("字"), type(nil), type(true), type([]), type({}), type(print));
+
+// 数组
+var list = [3, 1, 2];
+push(list, 4);
+print(list, pop(list), len(list));
+
+// map
+var user = {name: "ADCakeyuan", site: "adcakeyuan.top"};
+user["level"] = 3;
+print(user);
+print(keys(user), values(user));
+print(has(user, "level"), has(user, "email"));
+
+// 字符串处理：len、下标、插值
+var title = "手写一门编程语言";
+print(len(title), title[0], "${title}！");
+
+// 数字工具
+print(floor(3.99), abs(-7), num("42") + 1, str(42) + "!");
+
+// range 三件套
+print(range(3), range(1, 4), range(10, 0, -3));

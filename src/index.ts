@@ -73,3 +73,26 @@ function stripPosition(message: string): string {
 }
 
 export { RuntimeError }
+
+/**
+ * 会话：多次 run 共享同一份全局环境——REPL / 浏览器 Playground 用。
+ * 每段代码独立解析与作用域解析，声明过的全局变量跨段可见。
+ */
+export class Session {
+  private interpreter: Interpreter
+
+  constructor(options: RunOptions = {}) {
+    this.interpreter = new Interpreter(new Map(), options)
+  }
+
+  run(source: string): RunResult {
+    try {
+      const program = parse(source)
+      this.interpreter.setResolutions(resolve(program))
+      this.interpreter.run(program)
+      return { output: [] }
+    } catch (e) {
+      return { output: [], error: toErrorInfo(e) }
+    }
+  }
+}

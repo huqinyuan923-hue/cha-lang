@@ -1,0 +1,23 @@
+// 闭包：函数是值，函数记得它出生的地方
+fn makeCounter(prefix) {
+    var count = 0;
+    fn increment() {
+        count += 1;
+        return "${prefix} 第 ${count} 次";
+    }
+    return increment;
+}
+
+var tea = makeCounter("茶");
+var cake = makeCounter("点心");
+
+print(tea());   // 茶 第 1 次
+print(tea());   // 茶 第 2 次
+print(cake());  // 点心 第 1 次（各自有各自的 count）
+print(tea());   // 茶 第 3 次
+
+// 函数作为参数
+fn apply(f, x) {
+    return f(x);
+}
+print(apply(fn(n) { return n * n; }, 9));

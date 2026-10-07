@@ -100,6 +100,11 @@ export function parse(source: string): Program {
   }
 
   function statement(): Stmt {
+    if (match('SEMICOLON')) {
+      // 空语句：无害地吞掉多余的分号
+      const at = previous()!
+      return { type: 'block', body: [], line: at.line, col: at.col }
+    }
     if (match('IF')) return ifStmt()
     if (match('WHILE')) return whileStmt()
     if (match('FOR')) return forStmt()

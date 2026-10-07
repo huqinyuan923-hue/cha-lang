@@ -52,6 +52,11 @@ export class Interpreter {
     this.installBuiltins()
   }
 
+  /** REPL/会话场景：每段新代码有自己的作用域解析结果，但共享全局环境 */
+  setResolutions(resolutions: Resolutions): void {
+    this.resolutions = resolutions
+  }
+
   run(program: Program): void {
     for (const stmt of program) this.execStmt(stmt)
   }
