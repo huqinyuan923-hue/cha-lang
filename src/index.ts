@@ -2,6 +2,14 @@ import { Interpreter, RuntimeError } from './interpreter'
 import { LexError } from './lexer'
 import { parse, ParseError } from './parser'
 import { ResolveError, resolve } from './resolver'
+import { compile, FunctionCompiler } from './compiler'
+import { disassemble, type VMFunction } from './chunk'
+import { VirtualMachine } from './vm'
+
+export { RuntimeError }
+export { compile, FunctionCompiler }
+export { disassemble }
+export type { VMFunction }
 
 export interface ChaErrorInfo {
   name: string
@@ -72,8 +80,6 @@ function stripPosition(message: string): string {
   return message.replace(/^\[line \d+, col \d+\] /, '')
 }
 
-export { RuntimeError }
-
 /**
  * 会话：多次 run 共享同一份全局环境——REPL / 浏览器 Playground 用。
  * 每段代码独立解析与作用域解析，声明过的全局变量跨段可见。
@@ -93,6 +99,57 @@ export class Session {
       return { output: [] }
     } catch (e) {
       return { output: [], error: toErrorInfo(e) }
+    }
+  }
+}
+
+/**
+ * 字节码后端：词法 → 解析 → 作用域解析 → 编译 → VM 执行。
+ * 输出与错误信息与 run() 完全一致，可互换使用（差分测试保证）。
+ */
+export function runVM(source: string, options: RunOptions = {}): RunResult {
+  const output: string[] = []
+  const sink = options.output ?? ((text: string) => output.push(text))
+
+  try {
+    const program = parse(source)
+    resolve(program) // 编译期错误（重复声明、自引用等）与 run() 同相位
+    const proto = compile(program)
+    const vm = new VirtualMachine({ output: sink, clock: options.clock })
+    vm.execute(proto)
+    return { output }
+  } catch (e) {
+    return { output, error: toErrorInfo(e) }
+  }
+}
+
+/**
+ * 字节码后端的会话：多次 run 共享同一台 VM 的全局环境。
+ * 与 Session 不同，每次 run 的 print 输出会收集进返回值。
+ */
+export class VMSession {
+  private vm: VirtualMachine
+  private buffer: string[] = []
+
+  constructor(options: RunOptions = {}) {
+    this.vm = new VirtualMachine({
+      ...options,
+      output: (text) => {
+        this.buffer.push(text)
+        options.output?.(text)
+      },
+    })
+  }
+
+  run(source: string): RunResult {
+    this.buffer = []
+    try {
+      const program = parse(source)
+      resolve(program)
+      this.vm.execute(compile(program))
+      return { output: [...this.buffer] }
+    } catch (e) {
+      return { output: [...this.buffer], error: toErrorInfo(e) }
     }
   }
 }

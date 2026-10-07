@@ -1,12 +1,27 @@
 /** 运行时值系统：数字、字符串、布尔、nil、数组、map、函数 */
 
+/** 运行时错误：line/col 为 0 表示「由内建函数抛出，等待调用点归位」 */
+export class RuntimeError extends Error {
+  constructor(
+    message: string,
+    public line: number = 0,
+    public col: number = 0
+  ) {
+    super(line === 0 ? message : `[line ${line}, col ${col}] ${message}`)
+    this.name = 'RuntimeError'
+  }
+}
+
 export interface ChaFunction {
   type: 'function'
   name?: string
   params: string[]
   body: import('./ast').Stmt[]
-  /** 闭包：定义时的作用域 */
-  closure: Environment
+  /** 闭包：定义时的作用域（字节码后端的函数值没有这个字段） */
+  closure?: Environment
+  /** 字节码后端专属：编译产物与捕获的 upvalue（树遍历器不使用） */
+  chunk?: import('./chunk').Chunk
+  upvalues?: import('./chunk').Upvalue[]
 }
 
 export interface NativeFunction {

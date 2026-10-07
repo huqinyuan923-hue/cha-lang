@@ -84,34 +84,61 @@ print(茶单["龙井"], len(茶单), has(茶单, "普洱"));  // 30 3 true
 
 `print(...)` `clock()` `len(x)` `type(x)` `str(x)` `num(s)` `floor(n)` `abs(n)` `push(arr, v)` `pop(arr)` `keys(m)` `values(m)` `has(m, k)` `range(a[, b[, step]])`
 
-## 项目结构（一条流水线）
+## 项目结构（一条流水线，两个后端）
 
 ```
 源码.cha
   → src/lexer.ts       词法分析：字符流 → token（模板插值、嵌套注释都在这）
   → src/parser.ts      语法分析：token → AST（递归下降 + 优先级链）
   → src/resolver.ts    作用域解析：算出每个变量到声明处的距离，提前抓静态错误
-  → src/interpreter.ts 树遍历求值：环境链、闭包、内建函数
-  → src/index.ts       对外 API：run() / Session（不依赖 Node，可进浏览器）
+  │
+  ├─ 后端一（树遍历）  src/interpreter.ts   环境链求值，参照实现
+  └─ 后端二（字节码）  src/compiler.ts      AST → 字节码（栈槽分配 / upvalue 分析）
+                       src/vm.ts            栈式虚拟机：值栈 + 调用帧 + upvalue 闭包
+                       src/chunk.ts         指令集、常量池与反汇编器
+  │
+  → src/index.ts       对外 API：run() / runVM() / Session / VMSession（纯模块，可进浏览器）
   → src/cli.ts / repl.ts   命令行与交互环境
+  → playground/        浏览器 Playground（双后端切换 + 字节码视图）
+```
+
+两个后端由 **122 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
+包括错误信息里的行号和列号。
+
+## 基准（Node 24，Windows，中位数）
+
+| 用例 | 树遍历 | 字节码 VM | 加速比 |
+|---|---|---|---|
+| 递归 fib(22) | 80.0ms | 29.1ms | **2.75x** |
+| 闭包计数器 ×5 万 | 49.9ms | 16.9ms | **2.95x** |
+| 循环累加 20 万次 | 41.9ms | 29.5ms | 1.42x |
+| 数组/map 混合 ×2 万 | 23.3ms | 25.3ms | 0.92x |
+
+复现：`pnpm bench`。内建调用占比高的场景（数组/map）收益有限，
+纯计算场景接近 3 倍——符合树遍历 vs 栈式 VM 的理论预期。
+
+## 快速上手字节码
+
+```bash
+pnpm cha run examples/fib.cha --disasm   # 看编译出的字节码
+pnpm cha run examples/fib.cha            # 默认字节码 VM 跑
+pnpm cha run examples/fib.cha --tree     # 树遍历解释器跑
 ```
 
 ## 测试
 
-100 个用例，覆盖每个阶段的行为与报错：
-
 ```bash
-pnpm test        # 全量
+pnpm test        # 全量 122 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
 ## 路线图
 
+- [x] 字节码编译器 + 栈式虚拟机（差分验证：错误信息逐字一致，基准 1.4~3x）
+- [x] 浏览器 Playground（双后端切换 + 字节码视图，`playground/index.html`）
 - [ ] 字符串插值的解析器协同（消掉词法器的歧义报错）
 - [ ] 类与继承（成员方法、this）
 - [ ] try/catch 错误处理
-- [ ] 字节码编译器 + 栈式虚拟机（对照实验：快多少倍？）
-- [ ] 浏览器 Playground 嵌入博客文章
 - [ ] 自动分号插入（也许永远不做）
 
 ## 系列文章

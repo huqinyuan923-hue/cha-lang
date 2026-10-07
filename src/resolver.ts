@@ -175,7 +175,11 @@ export function resolve(program: Program): Map<Expr, number> {
     for (const p of fn.params) declare(p, fn.line, fn.col)
     for (const p of fn.params) define(p)
     fnDepth++
+    // break/continue 只对包含它们的循环生效，跨函数边界一律非法
+    const prevLoopDepth = loopDepth
+    loopDepth = 0
     for (const stmt of fn.body) resolveStmt(stmt)
+    loopDepth = prevLoopDepth
     fnDepth--
     end()
   }
