@@ -16,7 +16,6 @@ export type TokenType =
   | 'WHILE'
   | 'FOR'
   | 'RETURN'
-  | 'PRINT'
   | 'TRUE'
   | 'FALSE'
   | 'NIL'

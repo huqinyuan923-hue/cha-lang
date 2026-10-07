@@ -38,8 +38,8 @@ describe('基础 token', () => {
   })
 
   it('关键字与标识符', () => {
-    expect(types('var fn if else while for return print true false nil and or break continue')).toEqual([
-      'VAR', 'FN', 'IF', 'ELSE', 'WHILE', 'FOR', 'RETURN', 'PRINT', 'TRUE', 'FALSE',
+    expect(types('var fn if else while for return true false nil and or break continue')).toEqual([
+      'VAR', 'FN', 'IF', 'ELSE', 'WHILE', 'FOR', 'RETURN', 'TRUE', 'FALSE',
       'NIL', 'AND', 'OR', 'BREAK', 'CONTINUE', 'EOF',
     ])
     expect(types('variable ifx for_ _x')).toEqual([

@@ -19,7 +19,6 @@ const KEYWORDS: Record<string, TokenType> = {
   while: 'WHILE',
   for: 'FOR',
   return: 'RETURN',
-  print: 'PRINT',
   true: 'TRUE',
   false: 'FALSE',
   nil: 'NIL',
