@@ -28,6 +28,8 @@ jobs:
         run: pnpm test
       - name: 构建 CLI
         run: pnpm build
+      - name: 静态检查示例
+        run: node dist/cha.cjs check examples/*.cha
       - name: 冒烟运行（双后端 CLI 与 Playground 打包）
         run: |
           node dist/cha.cjs run examples/hello.cha

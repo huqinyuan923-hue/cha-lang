@@ -30,11 +30,16 @@ for (var i = 1; i <= len(杯子); i += 1) {
 ```bash
 pnpm install
 
-pnpm repl                # 交互式 REPL（表达式回显、多行输入、状态共享）
+pnpm repl                # 交互式 REPL（表达式回显、多行输入、状态共享、历史跨会话保存）
 pnpm cha run examples/hello.cha   # 运行脚本
+pnpm cha check examples/*.cha     # 只做词法/语法/作用域/编译检查，不执行
 pnpm test                # 单元 + 差分 + 300 种子模糊测试
 pnpm build               # esbuild 打包成单文件 dist/cha.cjs
 ```
+
+`cha check` 可以一次传多个文件，适合编辑器保存时或 CI 里当前置检查：全部通过返回 0，
+有语法/作用域/编译错误返回 65（错误同样带源码行与插入符），读不到文件返回 66。
+CLI 读取源码时会剥掉 Windows 编辑器常带的 UTF-8 BOM。
 
 ## 语言一览
 
@@ -140,7 +145,8 @@ tab 展开成 4 格、emoji 代理对整体算一个字符，超长行围绕插�
 ```
 
 片段由 `src/diagnostic.ts` 统一渲染，两个后端、CLI 与 Playground 共用同一份输出。REPL 刻意不显示片段：
-会话里错误的行号可能属于上一段输入，拿当前这段源码去抄只会指错地方。
+会话里错误的行号可能属于上一段输入，拿当前这段源码去抄只会指错地方；错误标题仍会给出当前输入内的行列。
+REPL 的历史存在 `~/.cha_repl_history`（最多 1000 条，可用 `CHA_HISTORY` 换路径），下次启动继续用上下键翻。
 
 `return` / `break` / `continue` 可以穿过 `try`，处理器跟着帧一起退，不会留下悬垂的 catch 让后面的错误被
 意外接住。**一个刻意的例外**：循环轮数预算是宿主级的止损，接住超预算的错误之后不会重新充能——同一次运行里
@@ -228,11 +234,12 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
   │
   → src/index.ts       对外 API：run() / runVM() / Session / VMSession（纯模块，可进浏览器）
   → src/diagnostic.ts  错误片段：源码行 + 显示宽度感知的插入符（CLI 与 Playground 共用）
-  → src/cli.ts / repl.ts   命令行与交互环境
+  → src/cli.ts / repl.ts   命令行与交互环境（check / run / repl）
+  → src/repl-history.ts    REPL 历史落盘（~/.cha_repl_history，上限 1000 条）
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图 + 执行轨迹回放）
 ```
 
-两个后端由 **217 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
+两个后端由 **232 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -265,7 +272,7 @@ printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 st
 ## 测试
 
 ```bash
-pnpm test        # 全量 217 个用例（含差分与模糊测试）
+pnpm test        # 全量 232 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
@@ -279,6 +286,7 @@ pnpm test:watch  # 开发模式
 - [x] 错误片段（CLI/Playground 共用 `src/diagnostic.ts`：中文/emoji/组合符/tab 感知的插入符与长行裁剪；REPL 因跨段输入刻意不抄源码）
 - [x] try/catch 错误处理（`throw` 扔的是值不是异常对象，运行时错误也能接住、接到的是那句中文消息；`return`/`break`/`continue` 穿过 `try` 时处理器跟着帧一起退，非局部控制流两个后端逐字一致）
 - [x] 执行轨迹回放（VM 逐指令记录函数/地址/行列/调用栈/栈顶快照，Playground 支持播放/暂停、逐步与进度条；上限 5000 步，截断不影响程序完整执行）
+- [x] 终端工作流（`cha check` 多文件静态检查、BOM 兼容、REPL 错误行列与跨会话历史）
 - [ ] 自动分号插入（也许永远不做）
 
 ## 系列文章

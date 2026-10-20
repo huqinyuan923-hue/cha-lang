@@ -4,6 +4,7 @@
  *   cha run 文件.cha            运行脚本（默认字节码 VM）
  *   cha run 文件.cha --tree     用树遍历解释器跑
  *   cha run 文件.cha --disasm   只打印字节码，不执行
+ *   cha check 文件.cha...       只做静态检查，不执行
  *   cha（或 cha repl）          进入 REPL
  */
 import { readFileSync } from 'fs'
@@ -21,6 +22,7 @@ const USAGE = `用法：
   cha run <文件.cha>            运行脚本（默认字节码 VM）
   cha run <文件.cha> --tree     用树遍历解释器跑
   cha run <文件.cha> --disasm   只打印字节码，不执行
+  cha check <文件.cha>...       只做词法/语法/作用域/编译检查，不执行
   cha [repl]                    进入交互式环境`
 
 export function main(argv: string[] = process.argv.slice(2)): void {
@@ -28,6 +30,40 @@ export function main(argv: string[] = process.argv.slice(2)): void {
 
   if (command === '--help' || command === '-h' || command === 'help') {
     console.log(USAGE)
+    return
+  }
+
+  if (command === 'check') {
+    const flags = rest.filter((a) => a.startsWith('-'))
+    if (flags.length > 0) {
+      console.error(`check 不接受选项，收到 '${flags.join(' ')}'。\n${USAGE}`)
+      process.exit(64)
+    }
+    if (rest.length === 0) {
+      console.error(`用法：cha check <文件.cha>...`)
+      process.exit(64)
+    }
+    let failed = false
+    for (const file of rest) {
+      let source: string
+      try {
+        source = readSource(file)
+      } catch {
+        console.error(`读不到文件：${file}`)
+        process.exit(66)
+      }
+      try {
+        const program = parse(source)
+        resolve(program)
+        compile(program)
+      } catch (e) {
+        reportCompileError(e, source)
+        failed = true
+        continue
+      }
+      console.log(`检查通过：${file}`)
+    }
+    if (failed) process.exit(65)
     return
   }
 
@@ -55,7 +91,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     }
     let source: string
     try {
-      source = readFileSync(file, 'utf8')
+      source = readSource(file)
     } catch {
       console.error(`读不到文件：${file}`)
       process.exit(66)
@@ -98,7 +134,13 @@ export function main(argv: string[] = process.argv.slice(2)): void {
   process.exit(64)
 }
 
-/** 编译期错误（--disasm 路径）的统一展示 */
+/** 读源码并剥掉 UTF-8 BOM：Windows 编辑器常带，U+FEFF 不是语言的一部分 */
+function readSource(file: string): string {
+  const source = readFileSync(file, 'utf8')
+  return source.charCodeAt(0) === 0xfeff ? source.slice(1) : source
+}
+
+/** 编译期错误（--disasm / check 路径）的统一展示 */
 function reportCompileError(e: unknown, source: string): void {
   if (e instanceof Error) {
     const anyE = e as Error & { line?: number; col?: number }

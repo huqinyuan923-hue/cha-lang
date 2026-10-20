@@ -1,6 +1,9 @@
 import { createInterface } from 'readline'
+import { homedir } from 'os'
+import { join } from 'path'
 import { pathToFileURL } from 'url'
 import { Session } from './index'
+import { HISTORY_LIMIT, loadHistory, saveHistory } from './repl-history'
 import { createStdinReader } from './stdin'
 
 /**
@@ -8,12 +11,20 @@ import { createStdinReader } from './stdin'
  * 特性：表达式自动回显、括号未闭合时多行续输入、全局状态跨行共享。
  */
 export async function startRepl(): Promise<void> {
+  const historyPath = process.env.CHA_HISTORY ?? join(homedir(), '.cha_repl_history')
+  // @types/node 没把运行时的 Interface.history 写进类型，这里补一个窄类型。
+  type ReadlineWithHistory = ReturnType<typeof createInterface> & { history: string[] }
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: '茶> ',
-  })
-  console.log('Cha（茶）REPL — 输入表达式直接看结果，:q 退出')
+    historySize: HISTORY_LIMIT,
+    removeHistoryDuplicates: true,
+  }) as ReadlineWithHistory
+  // readline 的历史是「最近的在最前」，文件里按时间正序存放
+  const saved = loadHistory(historyPath)
+  if (saved.length > 0) rl.history = [...saved].reverse()
+  console.log('Cha（茶）REPL — 输入表达式直接看结果，:help 看命令，:q 退出')
   rl.prompt()
 
   // 会话：变量与函数跨行共享
@@ -52,6 +63,11 @@ export async function startRepl(): Promise<void> {
       rl.close()
       return
     }
+    if (!pending && (input === ':h' || input === ':help')) {
+      console.log('命令：:help 显示本帮助，:q 退出；其余输入按 Cha 代码执行（表达式会自动回显）')
+      rl.prompt()
+      return
+    }
     if (!pending && input === '') {
       rl.prompt()
       return
@@ -75,10 +91,13 @@ export async function startRepl(): Promise<void> {
 
     for (const out of result.output) console.log(out)
     if (result.error) {
-      console.log(`  ⚠ ${phaseName(result.error.phase)}错误：${result.error.message}`)
+      const position = result.error.line > 0 ? `（第 ${result.error.line} 行，第 ${result.error.col} 列）` : ''
+      console.log(`  ⚠ ${phaseName(result.error.phase)}错误${position}：${result.error.message}`)
     }
     finishTurn()
   }).on('close', () => {
+    const entries = [...rl.history].reverse()
+    if (entries.length > 0) saveHistory(historyPath, entries)
     console.log('茶凉了，下次再喝 ☕')
     process.exit(0)
   })
