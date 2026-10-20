@@ -1,0 +1,15 @@
+{
+  "name": "Cha（茶）Playground",
+  "short_name": "Cha Playground",
+  "description": "用 TypeScript 从零手写的微型编程语言：浏览器内编辑运行、双后端切换、查看字节码。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#14120f",
+  "theme_color": "#14120f",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
