@@ -3,7 +3,7 @@
  * src/index 不依赖 Node API，这里是唯一接触 DOM 的地方。
  */
 import { run as runTree, runVM } from '../src/index'
-import type { ChaErrorInfo } from '../src/index'
+import type { ChaErrorInfo, RunResult } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
@@ -19,6 +19,7 @@ const showDisasm = document.getElementById('showDisasm') as HTMLInputElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
 const shareBtn = document.getElementById('share') as HTMLButtonElement | null
 const copyBtn = document.getElementById('copy') as HTMLButtonElement | null
+const compareBtn = document.getElementById('compare') as HTMLButtonElement | null
 
 let lastPlainText = ''
 
@@ -140,14 +141,7 @@ function loadShared(): { code: string; backend: 'vm' | 'tree' } | null {
   return { code, backend: params.get('b') === 'tree' ? 'tree' : 'vm' }
 }
 
-function render(src: string): void {
-  const t0 = performance.now()
-  const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
-  const result = backend === 'vm' ? runVM(src) : runTree(src)
-  const ms = performance.now() - t0
-  const backendName = backend === 'vm' ? '字节码 VM' : '树遍历'
-  timing.textContent = `${backendName} · ${ms.toFixed(1)}ms`
-
+function paintResult(result: RunResult, ms: number, src: string): void {
   if (showDisasm.checked) {
     try {
       const program = parse(src)
@@ -184,6 +178,16 @@ function render(src: string): void {
   }
   output.innerHTML = parts.join('') || '<div class="meta">（无输出）</div>'
   output.scrollTop = 0
+}
+
+function render(src: string): void {
+  const t0 = performance.now()
+  const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
+  const result = backend === 'vm' ? runVM(src) : runTree(src)
+  const ms = performance.now() - t0
+  const backendName = backend === 'vm' ? '字节码 VM' : '树遍历'
+  timing.textContent = `${backendName} · ${ms.toFixed(1)}ms`
+  paintResult(result, ms, src)
 }
 
 function escapeHtml(s: string): string {
@@ -337,6 +341,23 @@ copyBtn?.addEventListener('click', () => {
       setStatus('剪贴板不可用，复制失败')
     }
   )
+})
+compareBtn?.addEventListener('click', () => {
+  const src = editor.value
+  const t0 = performance.now()
+  const vmResult = runVM(src)
+  const t1 = performance.now()
+  runTree(src)
+  const t2 = performance.now()
+  const vmMs = t1 - t0
+  const treeMs = t2 - t1
+  const speed = vmMs > 0 ? treeMs / vmMs : 1
+  timing.textContent = `对比：VM ${vmMs.toFixed(1)}ms · 树遍历 ${treeMs.toFixed(1)}ms · ${speed.toFixed(2)}x`
+  paintResult(vmResult, vmMs, src)
+  setStatus(
+    `双后端对比完成：字节码 VM ${vmMs.toFixed(1)} 毫秒，树遍历 ${treeMs.toFixed(1)} 毫秒，加速比 ${speed.toFixed(2)} 倍`
+  )
+  saveState()
 })
 showDisasm.addEventListener('change', () => {
   render(editor.value)

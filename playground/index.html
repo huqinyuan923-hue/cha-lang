@@ -52,7 +52,8 @@
   main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
   section { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
   section:last-child { border-right: none; }
-  .pane-title { margin: 0; font-size: 12px; font-weight: 400; color: var(--dim); padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+  .pane-title { font-size: 12px; color: var(--dim); padding: 8px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
+  .pane-title h2 { margin: 0; font-size: 12px; font-weight: 400; color: inherit; }
   .pane-tools { display: inline-flex; align-items: center; gap: 10px; }
   .pane-title button { font-size: 12px; padding: 2px 10px; border-radius: 999px; }
   .pane-title button:hover { border-color: var(--dim); }
@@ -93,24 +94,28 @@
       <option value="vm">后端：字节码 VM</option>
       <option value="tree">后端：树遍历解释器</option>
     </select>
+    <button id="compare" type="button" title="依次运行两个后端并对比耗时">对比</button>
     <button id="share" type="button" title="复制包含当前代码与后端的分享链接">分享</button>
     <button id="run" class="primary" type="button" title="运行（Ctrl/Cmd + Enter）" aria-keyshortcuts="Control+Enter Meta+Enter">▶ 运行</button>
   </div>
 </header>
 <main>
   <section aria-labelledby="source-title">
-    <h2 class="pane-title" id="source-title"><span>源码</span><span id="timing" class="meta"></span></h2>
+    <div class="pane-title">
+      <h2 id="source-title">源码</h2>
+      <span id="timing" class="meta"></span>
+    </div>
     <label class="sr-only" for="editor">Cha 源码编辑器</label>
     <textarea id="editor" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" title="Tab 缩进 · Shift+Tab 反缩进 · Ctrl/Cmd+/ 注释 · Ctrl/Cmd+Enter 运行"></textarea>
   </section>
   <section aria-labelledby="output-title">
-    <h2 class="pane-title" id="output-title">
-      <span>输出</span>
+    <div class="pane-title">
+      <h2 id="output-title">输出</h2>
       <span class="pane-tools">
         <button id="copy" type="button" title="复制输出文本">复制</button>
         <label><input type="checkbox" id="showDisasm" /> 字节码视图</label>
       </span>
-    </h2>
+    </div>
     <span id="status" class="sr-only" role="status" aria-live="polite"></span>
     <pre id="output" aria-label="运行输出" tabindex="0"></pre>
   </section>
