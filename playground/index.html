@@ -13,6 +13,7 @@
 <meta property="og:title" content="Cha（茶）Playground — 字节码 VM 在线运行" />
 <meta property="og:description" content="TypeScript 手写的微型编程语言：词法分析、递归下降解析、树遍历解释器、字节码编译器与栈式虚拟机。浏览器内实时运行。" />
 <meta property="og:url" content="https://cha.adcakeyuan.top/" />
+<meta property="og:locale" content="zh_CN" />
 <meta property="og:image" content="https://adcakeyuan.top/static/images/projects/cha-lang.jpg" />
 <meta property="og:image:width" content="1280" />
 <meta property="og:image:height" content="720" />
@@ -23,7 +24,7 @@
 <meta name="twitter:image" content="https://adcakeyuan.top/static/images/projects/cha-lang.jpg" />
 <link rel="preload" href="./bundle.js" as="script" />
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Cha（茶）Playground","applicationCategory":"DeveloperApplication","operatingSystem":"Web","url":"https://cha.adcakeyuan.top/","description":"用 TypeScript 从零手写的微型编程语言 Playground：词法分析、递归下降解析、树遍历解释器与字节码虚拟机双后端。","offers":{"@type":"Offer","price":"0","priceCurrency":"CNY"}}
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Cha（茶）Playground","applicationCategory":"DeveloperApplication","operatingSystem":"Web","url":"https://cha.adcakeyuan.top/","codeRepository":"https://github.com/huqinyuan923-hue/cha-lang","description":"用 TypeScript 从零手写的微型编程语言 Playground：词法分析、递归下降解析、树遍历解释器与字节码虚拟机双后端。","offers":{"@type":"Offer","price":"0","priceCurrency":"CNY"}}
 </script>
 <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 <link rel="alternate icon" href="./favicon.ico" sizes="any" />
@@ -71,6 +72,7 @@
   .out-err { color: var(--err); }
   .out-line { color: var(--text); }
   .meta { color: var(--dim); }
+  .noscript { margin: 0; padding: 10px 16px; background: #2e2a22; color: var(--text); border-bottom: 1px solid var(--line); font-size: 13px; text-align: center; }
   @media (max-width: 800px) {
     main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
     body { padding-bottom: env(safe-area-inset-bottom); }
@@ -85,6 +87,7 @@
 </style>
 </head>
 <body>
+<noscript><p class="noscript">这个 Playground 需要 JavaScript 才能运行 Cha 编译器——请在浏览器设置中开启后刷新页面。</p></noscript>
 <header>
   <h1>茶 ☕ Playground</h1>
   <span class="tagline">TypeScript 手写的字节码编译器 + 栈式虚拟机，全程在你的浏览器里运行</span>
