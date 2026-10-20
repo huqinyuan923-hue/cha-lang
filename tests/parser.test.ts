@@ -216,6 +216,69 @@ describe('语句', () => {
   })
 })
 
+describe('类声明', () => {
+  type ClassStmt = Extract<Stmt, { type: 'class' }>
+
+  it('类名、父类与方法列表', () => {
+    const [stmt] = stmtsOf(`
+      class 猫 < 动物 {
+          init(名字) { this.名字 = 名字; }
+          叫() { return this.名字 + "喵"; }
+      }
+    `)
+    const cls = stmt as ClassStmt
+    expect(cls.type).toBe('class')
+    expect(cls.name).toBe('猫')
+    expect(cls.superclass).toMatchObject({ type: 'identifier', name: '动物' })
+    expect(cls.methods.map((m) => m.name)).toEqual(['init', '叫'])
+    expect(cls.methods[0]!.params).toEqual(['名字'])
+    expect(cls.methods[0]!.body[0]).toMatchObject({ type: 'exprStmt' })
+    expect(cls.methods[1]!.body[0]).toMatchObject({ type: 'return' })
+  })
+
+  it('无父类的类与空类体', () => {
+    const [stmt] = stmtsOf('class A { }')
+    const cls = stmt as ClassStmt
+    expect(cls.superclass).toBeUndefined()
+    expect(cls.methods).toEqual([])
+  })
+
+  it('this 与 super.方法', () => {
+    const [stmt] = stmtsOf('class A < B { m() { super.m(); return this; } }')
+    const cls = stmt as ClassStmt
+    const body = cls.methods[0]!.body
+    const first = body[0] as Extract<Stmt, { type: 'exprStmt' }>
+    const call = first.expr as Extract<Expr, { type: 'call' }>
+    expect(call.callee).toMatchObject({ type: 'superMember', key: 'm' })
+    const ret = body[1] as Extract<Stmt, { type: 'return' }>
+    expect(ret.value).toMatchObject({ type: 'this' })
+  })
+
+  it('类声明可以出现在函数与代码块里', () => {
+    const [fnStmt] = stmtsOf('fn f() { class A { m() { } } return A; }')
+    const fn = fnStmt as Extract<Stmt, { type: 'fnDecl' }>
+    expect(fn.fn.body[0]).toMatchObject({ type: 'class', name: 'A' })
+  })
+
+  it('类声明的残缺写法都有明确报错', () => {
+    expect(() => parse('class { }')).toThrow(/类名/)
+    expect(() => parse('class A < { }')).toThrow(/父类应是一个变量名/)
+    expect(() => parse('class A')).toThrow(/应该是 '\{'/)
+    expect(() => parse('class A {')).toThrow(/缺少收尾的 }/)
+    expect(() => parse('class A { m }')).toThrow(/方法 m 后面应该是/)
+    expect(() => parse('class A { m( }')).toThrow(/参数应是标识符/)
+    expect(() => parse('class A { m(x }')).toThrow(/参数表应以/)
+    expect(() => parse('class A { m() }')).toThrow(/函数体应是/)
+    expect(() => parse('class A { m() { }')).toThrow(/缺少收尾的 }/)
+    expect(() => parse('super')).toThrow(/super 后面应该是/)
+    expect(() => parse('super."m"')).toThrow(/super\. 后面应该是/)
+    // 关键字不能再拿来当变量名/方法名
+    expect(() => parse('var this = 1;')).toThrow(/变量名/)
+    expect(() => parse('var class = 1;')).toThrow(/变量名/)
+    expect(() => parse('class A { this() { } }')).toThrow(/方法名/)
+  })
+})
+
 describe('解析错误', () => {
   it('缺分号', () => {
     expect(() => parse('var a = 1')).toThrow(/';'/)

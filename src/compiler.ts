@@ -11,7 +11,7 @@
  *  - var x = fn ...{...} 与函数声明：先占槽位再编译函数体，函数体里
  *    引用自己的名字按 upvalue 捕获——局部递归函数因此可用。
  */
-import type { Expr, FnExpr, Program, Stmt } from './ast'
+import type { Expr, FnExpr, MethodDecl, Program, Stmt } from './ast'
 import { Chunk, Op, TemplateInfo, type VMFunction } from './chunk'
 
 interface LocalVar {
@@ -66,7 +66,11 @@ export class FunctionCompiler {
     private params: string[],
     pos: { line: number; col: number },
     /** 顶层脚本为 true：语句落在全局；函数体永远有自己的局部作用域 */
-    private isScript = false
+    private isScript = false,
+    /** 方法是函数的一种：槽位 0 是接收者（this），参数从槽位 1 开始 */
+    private isMethod = false,
+    /** init：所有 return 路径（含隐式收尾）都交出 this */
+    private isInitializer = false
   ) {
     this.enclosing = enclosing
     this.fn = {
@@ -79,6 +83,7 @@ export class FunctionCompiler {
     }
     if (!isScript) {
       this.beginScope()
+      if (isMethod) this.declareLocal('this', pos)
       for (const p of params) this.declareLocal(p, pos)
     }
   }
@@ -163,8 +168,9 @@ export class FunctionCompiler {
 
   private resolveUpvalue(name: string): number | null {
     if (!this.enclosing) return null
-    for (const scope of this.enclosing.scopes) {
-      const found = scope.find((v) => v.name === name)
+    // 从最内层往外找：内层同名变量遮蔽外层时，捕获的必须是内层那个
+    for (let i = this.enclosing.scopes.length - 1; i >= 0; i--) {
+      const found = this.enclosing.scopes[i]!.find((v) => v.name === name)
       if (found) {
         found.isCaptured = true
         return this.addUpvalue(true, found.slot)
@@ -199,6 +205,9 @@ export class FunctionCompiler {
         return
       case 'fnDecl':
         this.compileFnDecl(stmt.fn, stmt)
+        return
+      case 'class':
+        this.compileClass(stmt)
         return
       case 'block':
         this.beginScope()
@@ -249,7 +258,8 @@ export class FunctionCompiler {
         this.compileFor(stmt, stmt)
         return
       case 'return': {
-        if (stmt.value) this.compileExpr(stmt.value)
+        if (this.isInitializer) this.emitU16Op(Op.GET_LOCAL, 0, stmt)
+        else if (stmt.value) this.compileExpr(stmt.value)
         else this.emit(Op.NIL, stmt)
         this.emit(Op.RETURN, stmt)
         return
@@ -301,6 +311,58 @@ export class FunctionCompiler {
     if (isLocal) this.declareLocal(fn.name!, node)
     this.emitClosureProto(fn, fn)
     if (!isLocal) this.emitConstant(Op.DEFINE_GLOBAL, fn.name!, node)
+  }
+
+  /**
+   * 类声明。栈上的布局与 clox 相同：
+   *   [类] / 有父类时 [父类, 类] —— 父类值正好落在类作用域的 super 槽位
+   * 方法体由一个独立函数编译器编译，通过 upvalue 捕获类名（递归）与 super。
+   */
+  private compileClass(stmt: Extract<Stmt, { type: 'class' }>): void {
+    const isLocal = this.scopes.length > 0
+    if (isLocal) this.declareLocal(stmt.name, stmt)
+    this.emitConstant(Op.CLASS, stmt.name, stmt)
+    if (!isLocal) this.emitConstant(Op.DEFINE_GLOBAL, stmt.name, stmt)
+
+    if (stmt.superclass) {
+      this.compileExpr(stmt.superclass)
+      this.beginScope()
+      this.declareLocal('super', stmt.superclass)
+      this.compileGet(stmt.name, stmt)
+      this.emit(Op.INHERIT, stmt.superclass)
+    }
+
+    // 类对象在方法编译期间一直留在栈顶，每个 METHOD 弹掉闭包、留下类
+    this.compileGet(stmt.name, stmt)
+    for (const m of stmt.methods) {
+      this.compileMethod(stmt.name, m)
+      this.emitConstant(Op.METHOD, m.name, m)
+    }
+    this.emit(Op.POP, stmt)
+    if (stmt.superclass) this.endScope()
+  }
+
+  /** 编译方法原型并发射 CLOSURE + upvalue 描述（与匿名函数同一套） */
+  private compileMethod(className: string, method: MethodDecl): void {
+    const comp = new FunctionCompiler(
+      `${className}.${method.name}`,
+      this,
+      method.params,
+      method,
+      false,
+      true,
+      method.name === 'init'
+    )
+    comp.compileStmts(method.body)
+    const end = { line: method.line, col: method.col }
+    if (comp.isInitializer) comp.emitU16Op(Op.GET_LOCAL, 0, end)
+    else comp.emit(Op.NIL, end)
+    comp.emit(Op.RETURN, end)
+    this.emitConstant(Op.CLOSURE, comp.fn, method)
+    for (const up of comp.upvalues) {
+      this.chunk.write(up.isLocal ? 1 : 0, method.line, method.col)
+      this.chunk.write(up.index, method.line, method.col)
+    }
   }
 
   private compileWhile(test: Expr | undefined, body: Stmt, node: { line: number; col: number }): void {
@@ -430,6 +492,16 @@ export class FunctionCompiler {
         return
       case 'fn': {
         this.emitClosureProto(expr, expr)
+        return
+      }
+      case 'this':
+        this.compileGet('this', expr)
+        return
+      case 'superMember': {
+        // super.方法：接收者是 this，方法是父类链上找到的那个，绑定后作为普通可调用值
+        this.compileGet('this', expr)
+        this.compileGet('super', expr)
+        this.emitConstant(Op.GET_SUPER_METHOD, expr.key, expr)
         return
       }
       case 'assign':

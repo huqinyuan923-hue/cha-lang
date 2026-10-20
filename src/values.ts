@@ -75,7 +75,55 @@ export interface ChaFunction {
   /** 字节码后端专属：编译产物与捕获的 upvalue（树遍历器不使用） */
   chunk?: import('./chunk').Chunk
   upvalues?: import('./chunk').Upvalue[]
+  /** init 构造方法：返回时一律把实例本身交还给调用者 */
+  isInitializer?: boolean
 }
+
+/** 方法表的值：树遍历器存闭包，VM 存带 upvalue 的 VMClosure */
+export class ChaClass {
+  readonly type = 'class'
+  constructor(
+    readonly name: string,
+    public superclass: ChaClass | null,
+    readonly methods = new Map<string, ChaFunction>()
+  ) {}
+
+  /** 沿父类链找方法；找不到返回 null */
+  findMethod(name: string): ChaFunction | null {
+    const own = this.methods.get(name)
+    if (own !== undefined) return own
+    return this.superclass?.findMethod(name) ?? null
+  }
+}
+
+export class ChaInstance {
+  readonly type = 'instance'
+  readonly fields = new Map<string, Value>()
+  constructor(readonly klass: ChaClass) {}
+}
+
+/** 从实例上取到的方法值：调用时把接收者放在 this 上 */
+export interface BoundMethod {
+  type: 'boundMethod'
+  receiver: ChaInstance
+  method: ChaFunction
+}
+
+/** 两个后端共用的类相关错误文案 */
+export const classArityMessage = (className: string, arity: number, argc: number): string =>
+  `类 ${className}() 需要 ${arity} 个参数，收到 ${argc} 个`
+
+export const instanceMissingPropertyMessage = (className: string, key: string): string =>
+  `实例 ${className} 没有属性 '${key}'`
+
+export const instanceKeyMessage = (className: string, index: Value): string =>
+  `实例 ${className} 的属性名必须是字符串，得到 ${formatValue(index)}`
+
+export const superMissingMethodMessage = (className: string, name: string): string =>
+  `父类 ${className} 没有方法 '${name}'`
+
+export const superclassNotClassMessage = (className: string, got: Value): string =>
+  `类 ${className} 只能继承另一个类，得到 ${typeName(got)}`
 
 export interface NativeFunction {
   type: 'native'
@@ -85,7 +133,18 @@ export interface NativeFunction {
   fn: (args: Value[]) => Value
 }
 
-export type Value = number | string | boolean | null | Value[] | ChaMap | ChaFunction | NativeFunction
+export type Value =
+  | number
+  | string
+  | boolean
+  | null
+  | Value[]
+  | ChaMap
+  | ChaFunction
+  | NativeFunction
+  | ChaClass
+  | ChaInstance
+  | BoundMethod
 
 /** map 用 JS Map 承载：保持插入序、支持任意键类型 */
 export class ChaMap {
@@ -145,6 +204,8 @@ export function typeName(v: Value): string {
   if (typeof v === 'boolean') return 'bool'
   if (Array.isArray(v)) return 'array'
   if (v instanceof ChaMap) return 'map'
+  if (v instanceof ChaClass) return 'class'
+  if (v instanceof ChaInstance) return 'instance'
   if ('type' in v) return 'function'
   return 'unknown'
 }
@@ -179,6 +240,9 @@ export function formatValue(v: Value): string {
     for (const [k, val] of v.map) parts.push(`${formatKey(k)}: ${formatValue(val)}`)
     return `{${parts.join(', ')}}`
   }
+  if (v instanceof ChaClass) return `<class ${v.name}>`
+  if (v instanceof ChaInstance) return `<${v.klass.name} 实例>`
+  if (v.type === 'boundMethod') return `<fn ${v.method.name ?? '匿名'}>`
   if (v.type === 'function') return `<fn ${v.name ?? '匿名'}>`
   return '<native fn>'
 }

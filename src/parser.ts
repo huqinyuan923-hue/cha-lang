@@ -4,6 +4,7 @@ import type {
   Expr,
   FnExpr,
   MapEntry,
+  MethodDecl,
   Program,
   Stmt,
 } from './ast'
@@ -64,6 +65,7 @@ export function parse(source: string): Program {
   function declaration(): Stmt {
     if (check('VAR')) return varDecl()
     if (check('FN') && checkNext('IDENTIFIER')) return fnDecl()
+    if (check('CLASS')) return classDecl()
     return statement()
   }
 
@@ -85,7 +87,15 @@ export function parse(source: string): Program {
 
   /** 解析函数的参数表与函数体（供 fn 声明与匿名 fn 表达式共用） */
   function fnBody(name: string | undefined, kw: Token): FnExpr {
-    expect('LEFT_PAREN', `fn ${name ?? '(匿名)'} 后面应该是 '('`)
+    const label = `fn ${name ?? '(匿名)'}`
+    const params = paramList(label)
+    expect('LEFT_BRACE', `${label} 的函数体应是 {`)
+    const body = block()
+    return { type: 'fn', name, params, body, line: kw.line, col: kw.col }
+  }
+
+  function paramList(label: string): string[] {
+    expect('LEFT_PAREN', `${label} 后面应该是 '('`)
     const params: string[] = []
     if (!check('RIGHT_PAREN')) {
       do {
@@ -94,9 +104,33 @@ export function parse(source: string): Program {
       } while (match('COMMA'))
     }
     expect('RIGHT_PAREN', "参数表应以 ')' 结尾")
-    expect('LEFT_BRACE', `fn ${name ?? '(匿名)'} 的函数体应是 {`)
+    return params
+  }
+
+  /** class 名 [< 父类] { 方法... } */
+  function classDecl(): Stmt {
+    const kw = advance() // class
+    const name = expect('IDENTIFIER', 'class 后面应该是类名')
+    let superclass: Expr | undefined
+    if (match('LESS')) {
+      const sup = expect('IDENTIFIER', 'class 的父类应是一个变量名')
+      superclass = { type: 'identifier', name: sup.lexeme, line: sup.line, col: sup.col }
+    }
+    const open = expect('LEFT_BRACE', `class ${name.lexeme} 后面应该是 '{'`)
+    const methods: MethodDecl[] = []
+    while (!check('RIGHT_BRACE') && !atEnd()) methods.push(methodDecl())
+    if (atEnd()) error(open, `class ${name.lexeme} 缺少收尾的 }`)
+    advance() // }
+    return { type: 'class', name: name.lexeme, superclass, methods, line: kw.line, col: kw.col }
+  }
+
+  /** 类里的方法：名字直接跟参数表与 { 函数体 }，没有 fn 前缀 */
+  function methodDecl(): MethodDecl {
+    const name = expect('IDENTIFIER', '类体里应该是一个方法名')
+    const params = paramList(`方法 ${name.lexeme}`)
+    expect('LEFT_BRACE', `方法 ${name.lexeme} 的函数体应是 {`)
     const body = block()
-    return { type: 'fn', name, params, body, line: kw.line, col: kw.col }
+    return { name: name.lexeme, params, body, line: name.line, col: name.col }
   }
 
   function statement(): Stmt {
@@ -450,6 +484,16 @@ export function parse(source: string): Program {
         // 匿名函数表达式：fn (x) { ... }（后面不跟标识符时）
         advance()
         return fnBody(undefined, token)
+      }
+      case 'THIS': {
+        advance()
+        return { type: 'this', line: token.line, col: token.col }
+      }
+      case 'SUPER': {
+        advance()
+        expect('DOT', "super 后面应该是 '.' 和方法名")
+        const key = expect('IDENTIFIER', "super. 后面应该是方法名")
+        return { type: 'superMember', key: key.lexeme, line: token.line, col: token.col }
       }
       default:
         return error(token, `这里不能出现 '${token.lexeme || token.type}'`)

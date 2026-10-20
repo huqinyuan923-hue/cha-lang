@@ -123,6 +123,21 @@ try { print(点单(3)); } catch (原因) { print("不该跑：", 原因); }
 try { print(点单(0)); } catch (原因) { print("接住了：", 原因["错误码"], 原因["收到"]); }
 try { print([1, 2][9]); } catch (消息) { print("运行时错误也接：", 消息); }
 print("程序还在");`,
+  '类与继承（this / super）': `// init 构造，this 指实例；子类覆写方法，super 调父类那一段；不写 init 就继承父类的
+class 茶 {
+    init(名字, 年份) { this.名字 = 名字; this.年份 = 年份; }
+    介绍() { return "\${this.名字}（\${this.年份}）"; }
+    陈化(n) { this.年份 += n; return this; }
+}
+class 普洱 < 茶 {
+    介绍() { return super.介绍() + "，越陈越香"; }
+}
+var a = 茶("龙井", 2024);
+var b = 普洱("熟普", 2000);
+print(a.陈化(2).介绍());
+print(b.介绍());
+print(b.名字, b["年份"]);
+try { print(a.产地); } catch (消息) { print("查不到：", 消息); }`,
   '运行时错误演示': `// 出错也不怕：输出区会给出准确的错误名、行号与列号
 print("这行会先执行");
 var 结果 = 未知变量 + 1;

@@ -26,6 +26,9 @@ export type TokenType =
   | 'TRY'
   | 'CATCH'
   | 'THROW'
+  | 'CLASS'
+  | 'THIS'
+  | 'SUPER'
   // 单字符标点
   | 'LEFT_PAREN'
   | 'RIGHT_PAREN'

@@ -82,6 +82,15 @@ export enum Op {
   CLOSE_UPVALUES,
   RETURN,
 
+  /** u16 常量（类名）：创建新类压栈 */
+  CLASS,
+  /** u16 常量（方法名）：[class, closure] → [class]，方法装进类 */
+  METHOD,
+  /** [superclass, class] → [superclass]：校验父类并把 class 挂上去（父类值留给 super 用） */
+  INHERIT,
+  /** u16 常量（方法名）：[receiver, superclass] → boundMethod */
+  GET_SUPER_METHOD,
+
   /** u16 常量（TemplateInfo）：弹出 count 个值，插值组装成字符串 */
   TEMPLATE,
 }
@@ -183,6 +192,9 @@ const U16_OPS = new Set([
   Op.LOOP,
   Op.TRY,
   Op.CLOSE_UPVALUES,
+  Op.CLASS,
+  Op.METHOD,
+  Op.GET_SUPER_METHOD,
 ])
 
 /**
@@ -214,7 +226,10 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
         case Op.GET_GLOBAL:
         case Op.SET_GLOBAL:
         case Op.DEFINE_GLOBAL:
-        case Op.TEMPLATE: {
+        case Op.TEMPLATE:
+        case Op.CLASS:
+        case Op.METHOD:
+        case Op.GET_SUPER_METHOD: {
           const c = chunk.constants[operand]
           const shown =
             typeof c === 'string'
@@ -259,7 +274,7 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
       continue
     }
 
-    if (op === Op.CALL || op === Op.PICK) {
+    if (op === Op.CALL || op === Op.PICK || op === Op.GET_UPVALUE || op === Op.SET_UPVALUE) {
       note(String(chunk.code[ip++]!))
       continue
     }

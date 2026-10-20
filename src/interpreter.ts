@@ -1,6 +1,8 @@
 import type { Expr, Program, Stmt } from './ast'
 import { createBuiltins, type ReadLine } from './builtins'
 import {
+  ChaClass,
+  ChaInstance,
   ChaMap,
   DEFAULT_LOOP_BUDGET,
   Environment,
@@ -9,12 +11,19 @@ import {
   TOO_DEEP_MESSAGE,
   ThrowSignal,
   caughtValue,
+  classArityMessage,
   formatNumber,
   formatValue,
+  instanceKeyMessage,
+  instanceMissingPropertyMessage,
   isTruthy,
   loopBudgetMessage,
+  superclassNotClassMessage,
+  superMissingMethodMessage,
   typeName,
   valuesEqual,
+  type BoundMethod,
+  type ChaFunction,
   type NativeFunction,
   type Value,
 } from './values'
@@ -109,6 +118,33 @@ export class Interpreter {
           body: fn.body,
           closure: this.env,
         })
+        return
+      }
+      case 'class': {
+        // 父类先求值；类作用域无条件建出来（有无父类都不影响方法看到的层数）
+        let superclass: ChaClass | null = null
+        const classEnv = new Environment(this.env)
+        if (stmt.superclass) {
+          const v = this.evaluate(stmt.superclass)
+          if (!(v instanceof ChaClass)) {
+            throw this.err(stmt.superclass, superclassNotClassMessage(stmt.name, v))
+          }
+          superclass = v
+          classEnv.declare('super', v, true)
+        }
+        const klass = new ChaClass(stmt.name, superclass)
+        for (const m of stmt.methods) {
+          klass.methods.set(m.name, {
+            type: 'function',
+            name: `${stmt.name}.${m.name}`,
+            params: m.params,
+            body: m.body,
+            closure: classEnv,
+            isInitializer: m.name === 'init',
+          })
+        }
+        // 名字在方法体解析之后才写进环境也没关系：闭包持有的是同一个环境对象
+        this.env.declare(stmt.name, klass, true)
         return
       }
       case 'block': {
@@ -272,7 +308,31 @@ export class Interpreter {
       }
       case 'assign':
         return this.assign(expr)
+      case 'this': {
+        const dist = this.resolutions.get(expr)
+        if (dist === undefined) throw new Error('内部错误：this 没有解析结果')
+        return this.env.get('this', dist)
+      }
+      case 'superMember': {
+        const dist = this.resolutions.get(expr)
+        if (dist === undefined) throw new Error('内部错误：super 没有解析结果')
+        const superclass = this.env.get('super', dist) as ChaClass
+        const receiver = this.lookupThis() as ChaInstance
+        const method = superclass.findMethod(expr.key)
+        if (!method) throw this.err(expr, superMissingMethodMessage(superclass.name, expr.key))
+        return { type: 'boundMethod', receiver, method }
+      }
     }
+  }
+
+  /** super.方法 的接收者：沿环境链找最近的 this（this 是关键字，不会被用户变量遮蔽） */
+  private lookupThis(): Value {
+    let scope: Environment | undefined = this.env
+    while (scope) {
+      if (scope.isDeclared('this')) return scope.get('this', 0)
+      scope = scope.parent
+    }
+    throw new Error('内部错误：找不到 this')
   }
 
   /** 标识符取值：resolver 给了距离就跳层；全局（无记录）按名字回溯 */
@@ -389,6 +449,14 @@ export class Interpreter {
       }
       return target[index]!
     }
+    if (target instanceof ChaInstance) {
+      if (typeof index !== 'string') throw this.err(node, instanceKeyMessage(target.klass.name, index))
+      const field = target.fields.get(index)
+      if (field !== undefined) return field
+      const method = target.klass.findMethod(index)
+      if (method) return { type: 'boundMethod', receiver: target, method }
+      throw this.err(node, instanceMissingPropertyMessage(target.klass.name, index))
+    }
     throw this.err(node, `${typeName(target)} 不支持下标访问`)
   }
 
@@ -471,6 +539,11 @@ export class Interpreter {
       target.map.set(index, value)
       return
     }
+    if (target instanceof ChaInstance) {
+      if (typeof index !== 'string') throw this.err(node, instanceKeyMessage(target.klass.name, index))
+      target.fields.set(index, value)
+      return
+    }
     throw this.err(node, `${typeName(target)} 不支持按下标赋值`)
   }
 
@@ -491,35 +564,61 @@ export class Interpreter {
           throw e
         }
       }
+      if (callee.type === 'class') {
+        const klass = callee as ChaClass
+        const init = klass.findMethod('init')
+        const arity = init ? init.params.length : 0
+        if (args.length !== arity) {
+          throw this.err(node, classArityMessage(klass.name, arity, args.length))
+        }
+        const instance = new ChaInstance(klass)
+        if (!init) return instance
+        return this.invoke(init, args, instance, node)
+      }
+      if (callee.type === 'boundMethod') {
+        const bound = callee as BoundMethod
+        return this.invoke(bound.method, args, bound.receiver, node)
+      }
       if (callee.type === 'function') {
-        if (args.length !== callee.params.length) {
-          throw this.err(
-            node,
-            `函数 ${callee.name ?? '(匿名)'}() 需要 ${callee.params.length} 个参数，收到 ${args.length} 个`
-          )
-        }
-        const prev = this.env
-        const local = new Environment(callee.closure)
-        if (this.depth >= MAX_CALL_DEPTH) throw this.err(node, TOO_DEEP_MESSAGE)
-        this.depth++
-        try {
-          callee.params.forEach((p, i) => local.declare(p, args[i]!, true))
-          this.env = local
-          this.execStmts(callee.body)
-        } catch (e) {
-          if (e instanceof ReturnSignal) return e.value
-          // 树遍历器一个 cha 调用要占好几层 JS 栈，可能先于深度上限栈溢出。
-          // 在这里归位成与 VM 同一条错误：最深那层 call() 先接住，node 正好是递归调用点。
-          if (e instanceof RangeError) throw this.err(node, TOO_DEEP_MESSAGE)
-          throw e
-        } finally {
-          this.depth--
-          this.env = prev
-        }
-        return null
+        return this.invoke(callee, args, null, node)
       }
     }
     throw this.err(node, `${typeName(callee)} 不是函数，不能调用`)
+  }
+
+  /** 调用 cha 函数/方法：receiver 非空时在局部作用域里多绑一个 this */
+  private invoke(
+    callee: ChaFunction,
+    args: Value[],
+    receiver: ChaInstance | null,
+    node: { line: number; col: number }
+  ): Value {
+    if (args.length !== callee.params.length) {
+      throw this.err(
+        node,
+        `函数 ${callee.name ?? '(匿名)'}() 需要 ${callee.params.length} 个参数，收到 ${args.length} 个`
+      )
+    }
+    const prev = this.env
+    const local = new Environment(callee.closure)
+    if (this.depth >= MAX_CALL_DEPTH) throw this.err(node, TOO_DEEP_MESSAGE)
+    this.depth++
+    try {
+      if (receiver) local.declare('this', receiver, true)
+      callee.params.forEach((p, i) => local.declare(p, args[i]!, true))
+      this.env = local
+      this.execStmts(callee.body)
+    } catch (e) {
+      if (e instanceof ReturnSignal) return callee.isInitializer ? receiver : e.value
+      // 树遍历器一个 cha 调用要占好几层 JS 栈，可能先于深度上限栈溢出。
+      // 在这里归位成与 VM 同一条错误：最深那层 invoke() 先接住，node 正好是递归调用点。
+      if (e instanceof RangeError) throw this.err(node, TOO_DEEP_MESSAGE)
+      throw e
+    } finally {
+      this.depth--
+      this.env = prev
+    }
+    return callee.isInitializer ? receiver : null
   }
 
   // ---------- 内建函数 ----------

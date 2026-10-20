@@ -9,7 +9,9 @@
  */
 import { Chunk, Op, TemplateInfo, type Upvalue, type VMFunction } from './chunk'
 import {
+  ChaClass,
   ChaFunction,
+  ChaInstance,
   ChaMap,
   DEFAULT_LOOP_BUDGET,
   MAX_CALL_DEPTH,
@@ -17,12 +19,18 @@ import {
   TOO_DEEP_MESSAGE,
   ThrowSignal,
   caughtValue,
+  classArityMessage,
   formatNumber,
   formatValue,
+  instanceKeyMessage,
+  instanceMissingPropertyMessage,
   isTruthy,
   loopBudgetMessage,
+  superclassNotClassMessage,
+  superMissingMethodMessage,
   typeName,
   valuesEqual,
+  type BoundMethod,
   type NativeFunction,
   type Value,
 } from './values'
@@ -41,8 +49,10 @@ interface Frame {
   closure: VMClosure
   /** 返回地址（字节码下标） */
   ip: number
-  /** 本帧栈槽窗口的起始下标：参数在 base..base+arity-1 */
+  /** 本帧栈槽窗口的起始下标：参数在 base..base+arity-1（方法帧的 base 是接收者 this） */
   base: number
+  /** 返回值落在调用者的哪个槽位：普通函数是 callee 槽，方法帧是接收者槽 */
+  resultSlot: number
   /** 帧内活跃的 try 处理器栈；没有 try 时不分配 */
   handlers: Handler[] | null
 }
@@ -97,7 +107,7 @@ export class VirtualMachine {
     this.frames.length = 0
     this.openUpvalues.length = 0
     this.sp = 0
-    this.frames.push({ closure: this.makeClosure(proto, []), ip: 0, base: 0, handlers: null })
+    this.frames.push({ closure: this.makeClosure(proto, []), ip: 0, base: 0, resultSlot: 0, handlers: null })
     this.run()
   }
 
@@ -147,7 +157,7 @@ export class VirtualMachine {
       // 本帧没人接：关掉它的 upvalue、弹帧，到调用者里接着找
       this.closeUpvaluesFrom(frame.base)
       this.frames.pop()
-      this.sp = frame.base - 1
+      this.sp = frame.resultSlot
     }
     return false
   }
@@ -431,7 +441,11 @@ export class VirtualMachine {
 
         case Op.CALL: {
           const argc = code[ip++]!
-          const callee = stack[this.sp - 1 - argc]!
+          const calleeSlot = this.sp - 1 - argc
+          const callee = stack[calleeSlot]!
+          let called: VMClosure | null = null
+          /** 调用帧的槽位窗口起点：普通函数是实参起点，方法帧是接收者槽位 */
+          let base = calleeSlot + 1
           if (typeof callee === 'object' && callee !== null && 'type' in callee) {
             if (callee.type === 'native') {
               const native = callee as NativeFunction
@@ -455,35 +469,58 @@ export class VirtualMachine {
               stack[this.sp++] = result
               break
             }
-            if (callee.type === 'function') {
-              // VM 里能遇到的函数值都是本 VM 编译产物的闭包
-              const fn = callee as VMClosure
+            if (callee.type === 'class') {
+              const klass = callee as ChaClass
+              const init = klass.findMethod('init') as VMClosure | null
+              const arity = init ? init.params.length : 0
+              if (argc !== arity) throw err(start, classArityMessage(klass.name, arity, argc))
+              const instance = new ChaInstance(klass)
+              stack[calleeSlot] = instance
+              if (!init) break // 没有 init：实参必为 0，栈上留下实例即可
+              called = init
+              base = calleeSlot
+            } else if (callee.type === 'boundMethod') {
+              const bound = callee as BoundMethod
+              const fn = bound.method as VMClosure
               if (argc !== fn.params.length) {
                 throw err(
                   start,
                   `函数 ${fn.name ?? '(匿名)'}() 需要 ${fn.params.length} 个参数，收到 ${argc} 个`
                 )
               }
-              // 返回地址写回父帧，子帧从 0 开始执行
-              frame.ip = ip
-              // 顶层脚本帧不算一次 cha 调用，减掉才能和树遍历器的 depth 同点触发
-              if (this.frames.length - 1 >= MAX_CALL_DEPTH) throw err(start, TOO_DEEP_MESSAGE)
-              this.frames.push({ closure: fn, ip: 0, base: this.sp - argc, handlers: null })
-              frame = this.frames[this.frames.length - 1]!
-              code = frame.closure.chunk.code
-              lines = frame.closure.chunk.lines
-              cols = frame.closure.chunk.cols
-              constants = frame.closure.chunk.constants
-              ip = 0
-              break
+              // 接收者顶替 callee 槽，实参原地成为方法帧的 1..n 号槽位
+              stack[calleeSlot] = bound.receiver
+              called = fn
+              base = calleeSlot
+            } else if (callee.type === 'function') {
+              called = callee as VMClosure
             }
           }
-          throw err(start, `${typeName(callee)} 不是函数，不能调用`)
+          if (!called) throw err(start, `${typeName(callee)} 不是函数，不能调用`)
+          if (argc !== called.params.length) {
+            throw err(
+              start,
+              `函数 ${called.name ?? '(匿名)'}() 需要 ${called.params.length} 个参数，收到 ${argc} 个`
+            )
+          }
+          // 返回地址写回父帧，子帧从 0 开始执行
+          frame.ip = ip
+          // 顶层脚本帧不算一次 cha 调用，减掉才能和树遍历器的 depth 同点触发
+          if (this.frames.length - 1 >= MAX_CALL_DEPTH) throw err(start, TOO_DEEP_MESSAGE)
+          this.frames.push({ closure: called, ip: 0, base, resultSlot: calleeSlot, handlers: null })
+          frame = this.frames[this.frames.length - 1]!
+          code = frame.closure.chunk.code
+          lines = frame.closure.chunk.lines
+          cols = frame.closure.chunk.cols
+          constants = frame.closure.chunk.constants
+          ip = 0
+          break
         }
 
         case Op.RETURN: {
           const result = stack[this.sp - 1]!
           const base = frame.base
+          const resultSlot = frame.resultSlot
           this.closeUpvaluesFrom(base)
           this.frames.pop()
           if (this.frames.length === 0) {
@@ -492,8 +529,8 @@ export class VirtualMachine {
             this.sp = 1
             return
           }
-          this.sp = base
-          stack[this.sp - 1] = result
+          this.sp = resultSlot + 1
+          stack[resultSlot] = result
           frame = this.frames[this.frames.length - 1]!
           code = frame.closure.chunk.code
           lines = frame.closure.chunk.lines
@@ -534,6 +571,46 @@ export class VirtualMachine {
             }
           }
           stack[this.sp++] = this.makeClosure(proto, upvalues)
+          break
+        }
+
+        case Op.CLASS: {
+          const name = constants[code[ip]! | (code[ip + 1]! << 8)] as string
+          ip += 2
+          stack[this.sp++] = new ChaClass(name, null)
+          break
+        }
+        case Op.METHOD: {
+          const name = constants[code[ip]! | (code[ip + 1]! << 8)] as string
+          ip += 2
+          const method = stack[this.sp - 1]!
+          const klass = stack[this.sp - 2] as ChaClass
+          klass.methods.set(name, method as ChaFunction)
+          this.sp-- // 弹掉方法闭包，类留在栈上接下一个方法
+          break
+        }
+        case Op.INHERIT: {
+          const superclass = stack[this.sp - 2]!
+          const subclass = stack[this.sp - 1] as ChaClass
+          this.sp--
+          if (!(superclass instanceof ChaClass)) {
+            throw err(start, superclassNotClassMessage(subclass.name, superclass))
+          }
+          subclass.superclass = superclass
+          break
+        }
+        case Op.GET_SUPER_METHOD: {
+          const name = constants[code[ip]! | (code[ip + 1]! << 8)] as string
+          ip += 2
+          const superclass = stack[this.sp - 1]!
+          const receiver = stack[this.sp - 2]!
+          this.sp -= 2
+          if (!(superclass instanceof ChaClass)) {
+            throw err(start, '内部错误：super 绑定的不是类')
+          }
+          const method = superclass.findMethod(name)
+          if (!method) throw err(start, superMissingMethodMessage(superclass.name, name))
+          stack[this.sp++] = { type: 'boundMethod', receiver: receiver as ChaInstance, method }
           break
         }
 
@@ -633,6 +710,14 @@ export class VirtualMachine {
       }
       return target[index]!
     }
+    if (target instanceof ChaInstance) {
+      if (typeof index !== 'string') throw this.errAt(at, instanceKeyMessage(target.klass.name, index))
+      const field = target.fields.get(index)
+      if (field !== undefined) return field
+      const method = target.klass.findMethod(index)
+      if (method) return { type: 'boundMethod', receiver: target, method }
+      throw this.errAt(at, instanceMissingPropertyMessage(target.klass.name, index))
+    }
     throw this.errAt(at, `${typeName(target)} 不支持下标访问`)
   }
 
@@ -649,6 +734,11 @@ export class VirtualMachine {
     }
     if (target instanceof ChaMap) {
       target.map.set(index, value)
+      return
+    }
+    if (target instanceof ChaInstance) {
+      if (typeof index !== 'string') throw this.errAt(at, instanceKeyMessage(target.klass.name, index))
+      target.fields.set(index, value)
       return
     }
     throw this.errAt(at, `${typeName(target)} 不支持按下标赋值`)

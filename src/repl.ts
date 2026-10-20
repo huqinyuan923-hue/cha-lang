@@ -89,7 +89,7 @@ function asSource(input: string): string {
 }
 
 function looksLikeExpression(input: string): boolean {
-  return !/^(var|fn|if|while|for|return|break|continue|try|throw)\b/.test(input)
+  return !/^(var|fn|class|if|while|for|return|break|continue|try|throw)\b/.test(input)
 }
 
 function isOpenEnded(error: { phase: string; message: string }): boolean {

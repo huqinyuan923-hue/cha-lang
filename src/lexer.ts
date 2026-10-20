@@ -29,6 +29,9 @@ const KEYWORDS: Record<string, TokenType> = {
   try: 'TRY',
   catch: 'CATCH',
   throw: 'THROW',
+  class: 'CLASS',
+  this: 'THIS',
+  super: 'SUPER',
 }
 
 const ESCAPES: Record<string, string> = {

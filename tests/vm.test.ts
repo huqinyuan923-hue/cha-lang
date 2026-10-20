@@ -132,6 +132,19 @@ describe('VM 与树遍历器差分：闭包与 upvalue', () => {
       for (var j = 0; j < len(fns); j += 1) print(fns[j]());
     `)
   })
+
+  it('内层同名变量遮蔽外层时，闭包捕获的是内层那个', () => {
+    diff(`
+      fn f() {
+        var x = "外";
+        {
+          var x = "内";
+          return fn () { return fn () { return x; }; };
+        }
+      }
+      print(f()()());
+    `)
+  })
 })
 
 describe('VM 与树遍历器差分：循环与控制流', () => {
@@ -700,7 +713,294 @@ describe('VM 与树遍历器差分：try/catch 与 throw', () => {
   })
 })
 
+describe('VM 与树遍历器差分：类与继承', () => {
+  const both = (src: string, expected: string[]) => {
+    const r = diff(src)
+    expect(r.error).toBeUndefined()
+    expect(r.output).toEqual(expected)
+    return r
+  }
+  /** 出错路径也要逐字一致：diff() 比过两个后端，这里再钉住文案与位置 */
+  const fails = (src: string, expected: unknown) => {
+    const r = diff(src)
+    expect(r.error).toEqual(expected)
+    return r
+  }
+
+  it('构造、字段读写、方法与 this', () => {
+    both(
+      `
+      class 茶 {
+          init(名, 年) { this.名 = 名; this.年 = 年; }
+          介绍() { return this.名 + "（" + str(this.年) + " 年）"; }
+          陈化(n) { this.年 += n; return this; }
+      }
+      var a = 茶("龙井", 2024);
+      print(a.介绍());
+      print(a.陈化(2).介绍());
+      print(a.名, a["年"]);
+      `,
+      ['龙井（2024 年）', '龙井（2026 年）', '龙井 2026']
+    )
+  })
+
+  it('实例之间字段独立；方法取出来仍然绑定接收者', () => {
+    both(
+      `
+      class 计 {
+          init() { this.n = 0; }
+          加() { this.n = this.n + 1; return this.n; }
+      }
+      var a = 计();
+      var b = 计();
+      var f = a.加;
+      print(f(), f(), a.n, b.n);
+      a.n = 10;
+      print(a.加(), b.加());
+      `,
+      ['1 2 2 0', '11 1']
+    )
+  })
+
+  it('继承、覆写与多级 super 调用', () => {
+    both(
+      `
+      class 动物 {
+          init(名) { this.名 = 名; }
+          说话() { return this.名 + "…"; }
+          介绍() { return "我是 " + this.说话(); }
+      }
+      class 猫 < 动物 {
+          init(名) { super.init(名); }
+          说话() { return this.名 + "：喵"; }
+      }
+      class 波斯猫 < 猫 {
+          说话() { return super.说话() + "（长毛）"; }
+      }
+      var c = 波斯猫("咪");
+      print(c.介绍());
+      print(c.说话());
+      `,
+      ['我是 咪：喵（长毛）', '咪：喵（长毛）']
+    )
+  })
+
+  it('子类没有 init 时继承父类的 init', () => {
+    both(
+      `
+      class 基 { init(x) { this.x = x; } }
+      class 子 < 基 { }
+      var s = 子(4);
+      print(s.x);
+      s.init(9);
+      print(s.x);
+      `,
+      ['4', '9']
+    )
+  })
+
+  it('局部类：类名在方法里递归，且被闭包捕获', () => {
+    both(
+      `
+      fn 造(n) {
+          class 节点 {
+              init(v, 下) { this.v = v; this.下 = 下; }
+              和() {
+                  if (this.下 == nil) return this.v;
+                  return this.v + this.下.和();
+              }
+              加(x) { return 节点(this.v + x, this.下); }
+          }
+          return 节点(n, 节点(n + 1, nil));
+      }
+      print(造(3).和());
+      print(造(3).加(10).和());
+      `,
+      ['7', '17']
+    )
+  })
+
+  it('嵌套函数捕获 this 与 super', () => {
+    both(
+      `
+      fn 造() {
+          class 基 { m() { return "基"; } }
+          class 子 < 基 {
+              m() { return "子+" + super.m(); }
+              包() { return fn () { return this.m() + "/" + super.m(); }; }
+          }
+          return 子();
+      }
+      print(造().包()());
+      `,
+      ['子+基/基']
+    )
+  })
+
+  it('字段可以遮蔽方法，也能按字符串下标读写', () => {
+    both(
+      `
+      class A { m() { return "方法"; } }
+      var a = A();
+      print(a.m());
+      a.m = fn () { return "字段"; };
+      print(a.m());
+      a["x"] = 1;
+      a.x += 2;
+      print(a.x, a["x"]);
+      `,
+      ['方法', '字段', '3 3']
+    )
+  })
+
+  it('类相关运行时错误逐字对齐', () => {
+    fails('class A { } print(A().nope);', {
+      name: 'RuntimeError',
+      message: "实例 A 没有属性 'nope'",
+      line: 1,
+      col: 23,
+      phase: 'runtime',
+    })
+    fails('class A { init(x) { this.x = x; } } A();', {
+      name: 'RuntimeError',
+      message: '类 A() 需要 1 个参数，收到 0 个',
+      line: 1,
+      col: 39,
+      phase: 'runtime',
+    })
+    fails('class A { } A(1);', {
+      name: 'RuntimeError',
+      message: '类 A() 需要 0 个参数，收到 1 个',
+      line: 1,
+      col: 16,
+      phase: 'runtime',
+    })
+    fails('fn f() { } class A < f { }', {
+      name: 'RuntimeError',
+      message: '类 A 只能继承另一个类，得到 function',
+      line: 1,
+      col: 22,
+      phase: 'runtime',
+    })
+    fails('class A < 不存在 { }', {
+      name: 'RuntimeError',
+      message: "未定义的变量 '不存在'",
+      line: 1,
+      col: 11,
+      phase: 'runtime',
+    })
+    fails('class A { } class B < A { m() { return super.nope(); } } B().m();', {
+      name: 'RuntimeError',
+      message: "父类 A 没有方法 'nope'",
+      line: 1,
+      col: 40,
+      phase: 'runtime',
+    })
+    fails('class A { m(x) { return x; } } A().m();', {
+      name: 'RuntimeError',
+      message: '函数 A.m() 需要 1 个参数，收到 0 个',
+      line: 1,
+      col: 38,
+      phase: 'runtime',
+    })
+    fails('class A { } A()[0] = 1;', {
+      name: 'RuntimeError',
+      message: '实例 A 的属性名必须是字符串，得到 0',
+      line: 1,
+      col: 20,
+      phase: 'runtime',
+    })
+    fails('class A { } print(A()[0]);', {
+      name: 'RuntimeError',
+      message: '实例 A 的属性名必须是字符串，得到 0',
+      line: 1,
+      col: 24,
+      phase: 'runtime',
+    })
+  })
+
+  it('类相关静态错误逐字对齐（解析期与作用域期）', () => {
+    fails('print(this);', {
+      name: 'ResolveError',
+      message: 'this 只能用在类的方法里',
+      line: 1,
+      col: 7,
+      phase: 'resolve',
+    })
+    fails('class A { m() { return super.m(); } }', {
+      name: 'ResolveError',
+      message: 'super 只能用在有父类的类的方法里',
+      line: 1,
+      col: 24,
+      phase: 'resolve',
+    })
+    fails('class A { init() { return 1; } }', {
+      name: 'ResolveError',
+      message: 'init 里不能 return 值（构造完总是交出实例本身）',
+      line: 1,
+      col: 20,
+      phase: 'resolve',
+    })
+    fails('class A { m() { } m() { } }', {
+      name: 'ResolveError',
+      message: "类 A 里已经有名为 'm' 的方法了",
+      line: 1,
+      col: 19,
+      phase: 'resolve',
+    })
+    fails('class A < A { }', {
+      name: 'ResolveError',
+      message: '类 A 不能继承自己',
+      line: 1,
+      col: 11,
+      phase: 'resolve',
+    })
+    fails('class A { m() { this = 1; } }', {
+      name: 'ParseError',
+      message: '这里不能被赋值',
+      line: 1,
+      col: 22,
+      phase: 'parse',
+    })
+    // init 里的裸 return 合法；嵌套函数里的 return 值不受 init 规则约束
+    both(
+      `
+      class A {
+          init(x) { if (x > 0) return; this.x = x; }
+          包() { return fn () { return 1; }; }
+      }
+      print(A(1), A(-1).x, A(0).包()());
+      `,
+      ['<A 实例> -1 1']
+    )
+  })
+
+  it('catch 能接住类相关的运行时错误', () => {
+    both(
+      `
+      class A { }
+      try { print(A().x); } catch (e) { print("接住", e); }
+      try { A(1); } catch (e) { print("接住", e); }
+      print("继续");
+      `,
+      ['接住 实例 A 没有属性 \'x\'', '接住 类 A() 需要 0 个参数，收到 1 个', '继续']
+    )
+  })
+})
+
 describe('VM 专属：字节码与反汇编', () => {
+  it('反汇编展示 CLASS / METHOD / INHERIT / GET_SUPER_METHOD', () => {
+    const text = disassemble(
+      compile(parse('class A { m() { return 1; } } class B < A { m() { return super.m(); } }'))
+    )
+    expect(text).toContain('CLASS')
+    expect(text).toContain('METHOD')
+    expect(text).toContain('INHERIT')
+    expect(text).toContain('GET_SUPER_METHOD')
+    // 方法帧的 this 固定在槽位 0
+    expect(text).toMatch(/GET_LOCAL\s+0/)
+  })
+
   it('反汇编展示 TRY / END_TRY / THROW 三件套', () => {
     const text = disassemble(compile(parse('try { throw "x"; } catch (e) { print(e); }')))
     expect(text).toMatch(/ TRY\s+->/) // TRY 带前向偏移，落点就是 catch 入口

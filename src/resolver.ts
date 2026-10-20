@@ -33,6 +33,10 @@ export function resolve(program: Program): Map<Expr, number> {
   const globalNames = new Map<string, boolean>() // 全局层的声明状态（只做检查，不出距离表）
   let fnDepth = 0
   let loopDepth = 0
+  /** 当前所在的类：this 只在方法里可用，super 只在有父类的类的方法里可用 */
+  let currentClass: 'none' | 'class' | 'subclass' = 'none'
+  /** 当前函数是不是 init：init 里只能 return;（返回实例由两个后端统一处理） */
+  let currentMethod: 'none' | 'method' | 'init' = 'none'
 
   const begin = (): void => {
     scopes.push({ names: new Map() })
@@ -167,21 +171,51 @@ export function resolve(program: Program): Map<Expr, number> {
         return resolveExpr(expr.value)
       case 'fn':
         return resolveFn(expr)
+      case 'this':
+        if (currentClass === 'none') {
+          throw new ResolveError('this 只能用在类的方法里', expr.line, expr.col)
+        }
+        resolutions.set(expr, lookup('this')!)
+        return
+      case 'superMember':
+        if (currentClass !== 'subclass') {
+          throw new ResolveError('super 只能用在有父类的类的方法里', expr.line, expr.col)
+        }
+        resolutions.set(expr, lookup('super')!)
+        return
     }
   }
 
-  function resolveFn(fn: Extract<Expr, { type: 'fn' }>): void {
+  /** 函数与方法的共同部分：参数作用域、调用深度、循环/返回上下文 */
+  function resolveFnBody(
+    params: string[],
+    body: Stmt[],
+    pos: { line: number; col: number },
+    methodName: string | null
+  ): void {
     begin()
-    for (const p of fn.params) declare(p, fn.line, fn.col)
-    for (const p of fn.params) define(p)
+    if (methodName !== null) {
+      declare('this', pos.line, pos.col)
+      define('this')
+    }
+    for (const p of params) declare(p, pos.line, pos.col)
+    for (const p of params) define(p)
     fnDepth++
     // break/continue 只对包含它们的循环生效，跨函数边界一律非法
     const prevLoopDepth = loopDepth
     loopDepth = 0
-    for (const stmt of fn.body) resolveStmt(stmt)
+    // 嵌套函数里的 return 属于它自己，不该被外层 init 的规则约束
+    const prevMethod = currentMethod
+    currentMethod = methodName === null ? 'none' : methodName === 'init' ? 'init' : 'method'
+    for (const stmt of body) resolveStmt(stmt)
+    currentMethod = prevMethod
     loopDepth = prevLoopDepth
     fnDepth--
     end()
+  }
+
+  function resolveFn(fn: Extract<Expr, { type: 'fn' }>): void {
+    resolveFnBody(fn.params, fn.body, fn, null)
   }
 
   function resolveStmt(stmt: Stmt): void {
@@ -198,6 +232,35 @@ export function resolve(program: Program): Map<Expr, number> {
         // 先重名检查并立即生效，再解析函数体——函数体内引用自己（递归）必须可用
         declareImmediately(stmt.fn.name!, stmt.fn.line, stmt.fn.col)
         resolveFn(stmt.fn)
+        return
+      }
+      case 'class': {
+        // 类名与方法体里的递归引用同理：先声明再解析方法
+        declareImmediately(stmt.name, stmt.line, stmt.col)
+        if (stmt.superclass) {
+          if (stmt.superclass.type === 'identifier' && stmt.superclass.name === stmt.name) {
+            throw new ResolveError(`类 ${stmt.name} 不能继承自己`, stmt.superclass.line, stmt.superclass.col)
+          }
+          resolveExpr(stmt.superclass)
+        }
+        // 类作用域无条件存在（父类值绑在 super 上），解释器的环境层数与之对齐
+        begin()
+        if (stmt.superclass) {
+          declare('super', stmt.line, stmt.col)
+          define('super')
+        }
+        const prevClass = currentClass
+        currentClass = stmt.superclass ? 'subclass' : 'class'
+        const seen = new Set<string>()
+        for (const m of stmt.methods) {
+          if (seen.has(m.name)) {
+            throw new ResolveError(`类 ${stmt.name} 里已经有名为 '${m.name}' 的方法了`, m.line, m.col)
+          }
+          seen.add(m.name)
+          resolveFnBody(m.params, m.body, m, m.name)
+        }
+        currentClass = prevClass
+        end()
         return
       }
       case 'block':
@@ -243,6 +306,9 @@ export function resolve(program: Program): Map<Expr, number> {
       case 'return': {
         if (fnDepth === 0) {
           throw new ResolveError('return 只能出现在函数里', stmt.line, stmt.col)
+        }
+        if (currentMethod === 'init' && stmt.value) {
+          throw new ResolveError('init 里不能 return 值（构造完总是交出实例本身）', stmt.line, stmt.col)
         }
         if (stmt.value) resolveExpr(stmt.value)
         return

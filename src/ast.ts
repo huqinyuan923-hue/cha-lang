@@ -100,6 +100,21 @@ export interface MemberExpr {
   col: number
 }
 
+/** 方法里的 this：由 resolver 按普通变量计算距离，运行时绑到接收者身上 */
+export interface ThisExpr {
+  type: 'this'
+  line: number
+  col: number
+}
+
+/** super.方法：只可能出现在有父类的方法里；字段名同时是方法名 */
+export interface SuperMemberExpr {
+  type: 'superMember'
+  key: string
+  line: number
+  col: number
+}
+
 export type FnExpr = {
   type: 'fn'
   name?: string
@@ -121,6 +136,8 @@ export type Expr =
   | CallExpr
   | IndexExpr
   | MemberExpr
+  | ThisExpr
+  | SuperMemberExpr
   | FnExpr
   | AssignExpr
 
@@ -235,6 +252,25 @@ export interface FnDeclStmt {
   col: number
 }
 
+/** 类里的一个方法：没有 fn 前缀，名字后面直接跟参数表与函数体 */
+export interface MethodDecl {
+  name: string
+  params: string[]
+  body: Stmt[]
+  line: number
+  col: number
+}
+
+/** class 声明：单继承；superclass 是一个普通变量引用 */
+export interface ClassStmt {
+  type: 'class'
+  name: string
+  superclass?: Expr
+  methods: MethodDecl[]
+  line: number
+  col: number
+}
+
 export type Stmt =
   | ExprStmt
   | VarStmt
@@ -248,5 +284,6 @@ export type Stmt =
   | ThrowStmt
   | TryStmt
   | FnDeclStmt
+  | ClassStmt
 
 export type Program = Stmt[]
