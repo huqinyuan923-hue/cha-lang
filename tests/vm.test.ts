@@ -528,7 +528,186 @@ describe('VM 与树遍历器差分：字符串插值', () => {
   })
 })
 
+describe('VM 与树遍历器差分：try/catch 与 throw', () => {
+  const both = (src: string, expected: string[], options: RunOptions = {}) => {
+    const r = diff(src, options)
+    expect(r.output).toEqual(expected)
+    expect(r.error).toBeUndefined()
+    return r
+  }
+  /** 出错路径也要逐字一致：diff() 比过两个后端，这里再钉住文案与位置 */
+  const fails = (src: string, expected: unknown, options: RunOptions = {}) => {
+    const r = diff(src, options)
+    expect(r.error).toEqual(expected)
+    return r
+  }
+
+  it('throw 的值原样落到 catch；语言内部的错误落到的是那条中文消息', () => {
+    both('try { throw "茶凉了"; } catch (e) { print("接住：" + e); }', ['接住：茶凉了'])
+    both('var 盘 = ["龙井"]; try { print(盘[5]); } catch (e) { print(e); }', ['数组下标越界：长度 1，下标 5'])
+    both('try { print(1 / 0); } catch (e) { print(e); }', ['除数不能为 0'])
+    // 内建函数抛的错误本来挂在调用点上，catch 拿到的仍是同一条消息
+    both('try { len(1); } catch (e) { print(e); }', ['len() 只能用于字符串、数组、map，得到 number'])
+    both('try { throw "x"; } catch (e) { print(type(e)); }', ['string'])
+  })
+
+  it('抛出的是普通值：map、数组、nil、数字、函数都带类型过去', () => {
+    both('try { throw {码: 7}; } catch (e) { print(type(e), e["码"]); }', ['map 7'])
+    both('try { throw {层: {再: "深"}}; } catch (e) { print(e["层"]["再"]); }', ['深'])
+    both('try { throw [1, "a"]; } catch (e) { print(type(e), e); }', ['array [1, a]'])
+    both('try { throw nil; } catch (e) { print(e == nil, e); }', ['true nil'])
+    both('try { throw 42; } catch (e) { print(e + 1); }', ['43'])
+    both('try { throw 3 % 0; } catch (e) { print(e); }', ['取模的除数不能为 0'])
+    both('try { throw fn (x) { return x * 2; }; } catch (e) { print(type(e), e(21)); }', ['function 42'])
+  })
+
+  it('错误穿透函数调用，接住之后调用者的局部变量完好', () => {
+    both(
+      [
+        'fn 取(m, k) { if (has(m, k)) return m[k]; throw "没有这味：${k}"; }',
+        'var 菜单 = {龙井: 30};',
+        'for (var i = 0; i < 2; i += 1) {',
+        '    var 名 = i == 0 ? "龙井" : "普洱";',
+        '    try { print("${名} ${取(菜单, 名)} 元"); } catch (e) { print("接住：${e}"); }',
+        '}',
+      ].join('\n'),
+      ['龙井 30 元', '接住：没有这味：普洱']
+    )
+  })
+
+  it('嵌套 try：内层 catch 再抛外层接；catch 体自己的错不被自己接住', () => {
+    both('try { try { throw "内"; } catch (e) { throw "${e}→外"; } } catch (o) { print(o); }', ['内→外'])
+    both('try { try { print("平安"); } catch (e) { print("不该跑"); } } catch (o) { print("也不该跑"); }', ['平安'])
+    both('try { try { throw "a"; } catch (e) { undefinedFn(); } } catch (o) { print("外层：${o}"); }', [
+      "外层：未定义的变量 'undefinedFn'",
+    ])
+    // try 体跑顺了，catch 体一眼都不看——树遍历器曾在这里漏了 return
+    both('try { print("只跑 try"); } catch (e) { print("不该跑"); } print("收尾");', ['只跑 try', '收尾'])
+  })
+
+  it('return / break / continue 穿过 try 不算错误', () => {
+    both('fn f() { try { return 1; } catch (e) { print("不该跑"); } print("也不该跑"); return 2; } print(f());', ['1'])
+    both(
+      'var 出 = [];\nvar 最后 = 0;\nfor (var i = 0; i < 4; i += 1) {\n    最后 = i;\n    try {\n        if (i % 2 == 0) { continue; }\n        if (i == 3) { break; }\n        throw "轮 ${i}";\n    } catch (e) { push(出, e); }\n}\nprint(出, 最后);',
+      ['[轮 1] 3']
+    )
+    both(
+      'var 出 = [];\nvar i = 0;\nwhile (i < 3) {\n    i += 1;\n    try { if (i == 2) { break; } throw "轮 ${i}"; } catch (e) { push(出, e); }\n}\nprint(出, i);',
+      ['[轮 1] 2']
+    )
+  })
+
+  it('break 跳出 try 时处理器一并弹掉，之后没人接的错误照原样报出', () => {
+    // 少了 END_TRY 的话，这处越界会落进循环里那个早就离开的 catch
+    const r = fails(
+      'var 盘 = [1];\nvar i = 0;\nwhile (i < 2) { i += 1; try { break; } catch (e) { print("不该接住"); } }\nprint(盘[7]);',
+      {
+        name: 'RuntimeError',
+        message: '数组下标越界：长度 1，下标 7',
+        line: 4,
+        col: 10,
+        phase: 'runtime',
+      }
+    )
+    expect(r.output).toEqual([])
+  })
+
+  it('递归失控与循环超预算都能接住，接住之后照常往下跑', () => {
+    both('fn g(n) { return g(n + 1); }\ntry { g(0); } catch (e) { print("深：${e}"); }\nprint("之后还活着");', [
+      '深：递归太深：调用深度超过 500 层，可能没有出口',
+      '之后还活着',
+    ])
+    both('try { while (true) { } } catch (e) { print(e); } print("之后");', ['循环跑了太多轮（超过 100 轮），疑似死循环', '之后'], {
+      loopBudget: 100,
+    })
+    // 预算是宿主级的止损，接住之后不重新计时：第二次一进循环就再撞
+    both(
+      [
+        'fn 空转() { while (true) { } }',
+        'var 记 = [];',
+        'try { 空转(); } catch (e) { push(记, "一 ${e}"); }',
+        'try { 空转(); } catch (e) { push(记, "二"); }',
+        'print(记);',
+      ].join('\n'),
+      ['[一 循环跑了太多轮（超过 10 轮），疑似死循环, 二]'],
+      { loopBudget: 10 }
+    )
+  })
+
+  it('catch 参数只在 catch 体里可见：能遮蔽外层同名变量，也能被闭包带走', () => {
+    both('var e = "外层"; try { throw "内层"; } catch (e) { print(e); } print(e);', ['内层', '外层'])
+    both('var 记 = []; try { throw "带走"; } catch (err) { push(记, fn () { return err; }); } print(记[0]());', ['带走'])
+    both(
+      'try { throw 1; } catch (e) { var 只在catch = 2; print(只在catch); }\ntry { print(只在catch); } catch (e2) { print(e2); }',
+      ['2', "未定义的变量 '只在catch'"]
+    )
+    fails('try { throw 1; } catch (e) { var e = 2; print(e); }', {
+      name: 'ResolveError',
+      message: "当前作用域里已经有名为 'e' 的变量了",
+      line: 1,
+      col: 30,
+      phase: 'resolve',
+    })
+  })
+
+  it('没人接住的 throw 报的是 throw 那一行的位置', () => {
+    fails('throw "没人接";', {
+      name: 'ThrowError',
+      message: 'throw 抛出的值未被捕获：没人接',
+      line: 1,
+      col: 1,
+      phase: 'runtime',
+    })
+    fails('fn f() {\n    throw "深处";\n}\nf();', {
+      name: 'ThrowError',
+      message: 'throw 抛出的值未被捕获：深处',
+      line: 2,
+      col: 5,
+      phase: 'runtime',
+    })
+    fails('throw [1, "a"];', {
+      name: 'ThrowError',
+      message: 'throw 抛出的值未被捕获：[1, a]',
+      line: 1,
+      col: 1,
+      phase: 'runtime',
+    })
+    // try 之前就没机会：语法错误在跑起来之前，catch 帮不上忙
+    fails('try { throw } catch (e) { }', {
+      name: 'ParseError',
+      message: "这里不能出现 '}'",
+      line: 1,
+      col: 13,
+      phase: 'parse',
+    })
+  })
+
+  it('循环外的 break 仍然报错，包在 try 里也一样', () => {
+    fails('try { break; } catch (e) { print(e); }', {
+      name: 'ResolveError',
+      message: 'break 只能出现在循环里',
+      line: 1,
+      col: 7,
+      phase: 'resolve',
+    })
+    fails('try { return 1; } catch (e) { print(e); }', {
+      name: 'ResolveError',
+      message: 'return 只能出现在函数里',
+      line: 1,
+      col: 7,
+      phase: 'resolve',
+    })
+  })
+})
+
 describe('VM 专属：字节码与反汇编', () => {
+  it('反汇编展示 TRY / END_TRY / THROW 三件套', () => {
+    const text = disassemble(compile(parse('try { throw "x"; } catch (e) { print(e); }')))
+    expect(text).toMatch(/ TRY\s+->/) // TRY 带前向偏移，落点就是 catch 入口
+    expect(text).toContain('END_TRY')
+    expect(text).toContain('THROW')
+  })
+
   it('反汇编输出包含指令与位置', () => {
     const proto = compile(parse('var x = 1; print(x + 2);'))
     const text = disassemble(proto)

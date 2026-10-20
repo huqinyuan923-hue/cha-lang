@@ -109,6 +109,8 @@ export function parse(source: string): Program {
     if (match('WHILE')) return whileStmt()
     if (match('FOR')) return forStmt()
     if (match('RETURN')) return returnStmt()
+    if (match('THROW')) return throwStmt()
+    if (match('TRY')) return tryStmt()
     if (check('BREAK')) return breakContinue('break')
     if (check('CONTINUE')) return breakContinue('continue')
     if (match('LEFT_BRACE')) {
@@ -174,6 +176,34 @@ export function parse(source: string): Program {
     const kw = advance()
     expect('SEMICOLON', `${kind} 语句应以 ';' 结尾`)
     return { type: kind, line: kw.line, col: kw.col }
+  }
+
+  function throwStmt(): Stmt {
+    const kw = previous()!
+    const value = expression()
+    expect('SEMICOLON', "throw 语句应以 ';' 结尾")
+    return { type: 'throw', value, line: kw.line, col: kw.col }
+  }
+
+  /** try 与 catch 的体都是 { ... }，各自一层作用域；catch 的参数只活在 catch 体里 */
+  function tryStmt(): Stmt {
+    const kw = previous()!
+    expect('LEFT_BRACE', "try 后面应该是 '{'")
+    const body = block()
+    expect('CATCH', "try 之后应该有 catch")
+    expect('LEFT_PAREN', "catch 后面应该是 '('")
+    const param = expect('IDENTIFIER', 'catch 的括号里应该是变量名')
+    expect('RIGHT_PAREN', "catch 参数应以 ')' 结尾")
+    expect('LEFT_BRACE', "catch 的 body 应是 {")
+    const catchBody = block()
+    return {
+      type: 'try',
+      body,
+      catchParam: param.lexeme,
+      catchBody,
+      line: kw.line,
+      col: kw.col,
+    }
   }
 
   function block(): Stmt[] {

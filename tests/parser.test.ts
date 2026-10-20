@@ -201,6 +201,19 @@ describe('语句', () => {
     const s = stmtsOf('{ print(1); print(2); }')[0]!
     expect(s.type).toBe('block')
   })
+
+  it('try/catch 与 throw', () => {
+    const t = stmtsOf('try { throw "x"; } catch (错误) { print(错误); }')[0] as Extract<
+      Stmt,
+      { type: 'try' }
+    >
+    expect(t.type).toBe('try')
+    expect(t.catchParam).toBe('错误')
+    expect(t.body[0]).toMatchObject({ type: 'throw', value: { type: 'literal', value: 'x' } })
+    expect(t.catchBody[0]).toMatchObject({ type: 'exprStmt' })
+    // try 与 catch 的体都必须是大括号，且各自是一层作用域
+    expect(() => parse('try if (a) { throw 1; } catch (e) { }')).toThrow(ParseError)
+  })
 })
 
 describe('解析错误', () => {
@@ -215,6 +228,20 @@ describe('解析错误', () => {
   it('多余 token', () => {
     expect(() => parse('var 1a;')).toThrow(ParseError)
     expect(() => parse('print(1) print(2);')).toThrow(ParseError)
+  })
+
+  it('try 的每种残缺写法都有明确报错', () => {
+    expect(() => parse('try')).toThrow(/try 后面应该是/)
+    expect(() => parse('try { print(1); }')).toThrow(/catch/)
+    expect(() => parse('try { print(1); } catch')).toThrow(/catch 后面应该是/)
+    expect(() => parse('try { print(1); } catch e { }')).toThrow(/catch 后面应该是/)
+    expect(() => parse('try { print(1); } catch (e) print(2);')).toThrow(/catch 的 body 应是/)
+    expect(() => parse('try { print(1); } catch (e) { }')).not.toThrow()
+    // 关键字保留下来就不能再当变量名
+    expect(() => parse('var try = 1;')).toThrow(/变量名/)
+    expect(() => parse('var throw = 1;')).toThrow(/变量名/)
+    expect(() => parse('throw 1')).toThrow(/throw 语句应以/)
+    expect(() => parse('throw')).toThrow(/这里不能出现/)
   })
 
   it('空程序合法', () => {

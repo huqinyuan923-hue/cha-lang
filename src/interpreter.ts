@@ -7,6 +7,8 @@ import {
   MAX_CALL_DEPTH,
   RuntimeError,
   TOO_DEEP_MESSAGE,
+  ThrowSignal,
+  caughtValue,
   formatNumber,
   formatValue,
   isTruthy,
@@ -24,6 +26,13 @@ class BreakSignal {}
 class ContinueSignal {}
 class ReturnSignal {
   constructor(public value: Value) {}
+}
+
+/** 这条异常该不该交给 catch：throw 给原值，内建与语言内部的错误给它的中文消息 */
+function catchBinding(e: unknown): { value: Value } | null {
+  if (e instanceof ThrowSignal) return { value: e.value }
+  if (e instanceof RuntimeError) return { value: caughtValue(e) }
+  return null
 }
 
 export interface InterpreterOptions {
@@ -158,6 +167,32 @@ export class Interpreter {
         throw new BreakSignal()
       case 'continue':
         throw new ContinueSignal()
+      case 'throw':
+        throw new ThrowSignal(this.evaluate(stmt.value), stmt.line, stmt.col)
+      case 'try': {
+        const prev = this.env
+        let bound: { value: Value } | null = null
+        try {
+          this.env = new Environment(prev)
+          this.execStmts(stmt.body)
+          // try 体顺利跑完，catch 体一眼都不看（VM 那边由 END_TRY + JUMP 跳过）
+          return
+        } catch (e) {
+          // return / break / continue 不是错误，照常往外穿透
+          bound = catchBinding(e)
+          if (!bound) throw e
+        } finally {
+          this.env = prev
+        }
+        this.env = new Environment(prev)
+        try {
+          this.env.declare(stmt.catchParam, bound!.value, true)
+          this.execStmts(stmt.catchBody)
+        } finally {
+          this.env = prev
+        }
+        return
+      }
     }
   }
 

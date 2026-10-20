@@ -205,6 +205,20 @@ export function resolve(program: Program): Map<Expr, number> {
         for (const s of stmt.body) resolveStmt(s)
         end()
         return
+      case 'throw':
+        return resolveExpr(stmt.value)
+      case 'try': {
+        // try 体与 catch 体各一层作用域；catch 的参数只活在 catch 体里
+        begin()
+        for (const s of stmt.body) resolveStmt(s)
+        end()
+        begin()
+        declare(stmt.catchParam, stmt.line, stmt.col)
+        define(stmt.catchParam)
+        for (const s of stmt.catchBody) resolveStmt(s)
+        end()
+        return
+      }
       case 'if':
         resolveExpr(stmt.test)
         resolveStmt(stmt.then)

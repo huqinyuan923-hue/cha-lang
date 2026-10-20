@@ -38,6 +38,8 @@ interface LoopCtx {
   breakDepth: number
   /** 循环语句自己的位置：所有回跳都挂它，超预算时两个后端才能报同一行同一列 */
   node: { line: number; col: number }
+  /** 进入这个循环时套了几层 try：break/continue 跳出循环时要顺带弹掉它们 */
+  tryDepth: number
 }
 
 const COMPOUND_OPS: Record<string, Op> = {
@@ -54,6 +56,8 @@ export class FunctionCompiler {
   private scopes: LocalVar[][] = []
   private slotCount = 0
   private loopCtxs: LoopCtx[] = []
+  /** 当前套了几层 try：跳出（break/continue）时要按层数弹掉处理器 */
+  private tryDepth = 0
   private upvalues: { isLocal: boolean; index: number }[] = []
 
   constructor(
@@ -95,7 +99,9 @@ export class FunctionCompiler {
     node: { line: number; col: number }
   ): void {
     this.chunk.write(op, node.line, node.col)
-    this.chunk.writeU16(this.chunk.addConstant(constant), node.line, node.col)
+    const index = this.chunk.addConstant(constant)
+    if (index > 0xffff) throw new Error('编译错误：常量池超出 65536 项')
+    this.chunk.writeU16(index, node.line, node.col)
   }
 
   /** 发射前向跳转，返回指令地址（回填时用 patchJump） */
@@ -106,7 +112,9 @@ export class FunctionCompiler {
   }
 
   private patchJump(at: number): void {
-    this.chunk.patchU16(at, this.chunk.code.length - (at + 3))
+    const delta = this.chunk.code.length - (at + 3)
+    if (delta > 0xffff) throw new Error('编译错误：分支体过大（前向跳转超出 64KB）')
+    this.chunk.patchU16(at, delta)
   }
 
   /** 发射后向跳转（LOOP） */
@@ -197,6 +205,29 @@ export class FunctionCompiler {
         this.compileStmts(stmt.body)
         this.endScope()
         return
+      case 'throw':
+        this.compileExpr(stmt.value)
+        this.emit(Op.THROW, stmt)
+        return
+      case 'try': {
+        // TRY 的落点：VM 已经在那里把抛出的值压在栈顶，槽位正好是 catch 参数
+        const catchJump = this.emitJump(Op.TRY, stmt)
+        this.tryDepth++
+        this.beginScope()
+        this.compileStmts(stmt.body)
+        this.endScope()
+        this.tryDepth--
+        // try 体正常结束：这个 catch 从此不再接收错误
+        this.emit(Op.END_TRY, stmt)
+        const endJump = this.emitJump(Op.JUMP, stmt)
+        this.patchJump(catchJump)
+        this.beginScope()
+        this.declareLocal(stmt.catchParam, stmt)
+        this.compileStmts(stmt.catchBody)
+        this.endScope()
+        this.patchJump(endJump)
+        return
+      }
       case 'if': {
         this.compileExpr(stmt.test)
         const elseJump = this.emitJump(Op.JUMP_IF_FALSE, stmt)
@@ -228,6 +259,9 @@ export class FunctionCompiler {
         const ctx = this.loopCtxs[this.loopCtxs.length - 1]
         if (!ctx) throw new Error(`内部错误：${stmt.type} 未通过 resolver 检查`)
         const depth = stmt.type === 'continue' ? ctx.continueDepth : ctx.breakDepth
+        // 跳转路径会跳过 try 体的 END_TRY：先按跨过的层数弹掉处理器，
+        // 否则之后出的错会落进一个早就离开的 catch
+        for (let d = this.tryDepth; d > ctx.tryDepth; d--) this.emit(Op.END_TRY, stmt)
         // 跳转路径会越过内层作用域的 endScope，这里手动关闭并弹掉更深的槽位
         this.emitU16Op(Op.CLOSE_UPVALUES, depth, stmt)
         for (let s = this.slotCount; s > depth; s--) this.emit(Op.POP, stmt)
@@ -282,6 +316,7 @@ export class FunctionCompiler {
       continueDepth: depth,
       breakDepth: depth,
       node,
+      tryDepth: this.tryDepth,
     }
     this.loopCtxs.push(ctx)
     this.compileStmt(body)
@@ -307,6 +342,7 @@ export class FunctionCompiler {
       continueDepth: this.slotCount,
       breakDepth,
       node,
+      tryDepth: this.tryDepth,
     }
     this.loopCtxs.push(ctx)
     this.compileStmt(stmt.body)

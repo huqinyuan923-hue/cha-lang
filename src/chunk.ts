@@ -67,6 +67,13 @@ export enum Op {
   /** u16 后向偏移：循环回跳 */
   LOOP,
 
+  /** u16 前向偏移：登记 catch 入口与当前栈深，压入一个处理器 */
+  TRY,
+  /** try 体正常走完：弹掉最内层处理器，之后的错误不该再落进这个 catch */
+  END_TRY,
+  /** 弹出栈顶值作为抛出内容，向外找处理器（本帧 → 调用者帧 → ……） */
+  THROW,
+
   /** u8 参数个数：栈顶布局 [callee, arg1..argN] */
   CALL,
   /** u16 常量（函数原型）+ upvalue 描述对 (isLocal u8, index u8) × n */
@@ -116,6 +123,7 @@ export class Chunk {
   private constantIndex = new Map<string, number>()
 
   write(byte: number, line: number, col: number): void {
+    if (!(byte >= 0 && byte <= 0xff)) throw new Error(`编译错误：字节 ${byte} 超出 0..255（行 ${line} 列 ${col}）`)
     this.code.push(byte)
     this.lines.push(line)
     this.cols.push(col)
@@ -123,12 +131,15 @@ export class Chunk {
 
   /** 写入小端 u16 操作数 */
   writeU16(value: number, line: number, col: number): void {
+    if (!(value >= 0 && value <= 0xffff)) throw new Error(`编译错误：操作数 ${value} 超出 u16（行 ${line} 列 ${col}）`)
     this.write(value & 0xff, line, col)
     this.write((value >>> 8) & 0xff, line, col)
   }
 
   /** 修改已写入的 u16（跳转回填用），offset 为指令起始地址 */
   patchU16(at: number, value: number): void {
+    if (!(value >= 0 && value <= 0xffff)) throw new Error(`编译错误：回填值 ${value} 超出 u16（地址 ${at}）`)
+    if (at + 2 >= this.code.length) throw new Error(`编译错误：回填地址 ${at} 越界`)
     this.code[at + 1] = value & 0xff
     this.code[at + 2] = (value >>> 8) & 0xff
   }
@@ -170,6 +181,7 @@ const U16_OPS = new Set([
   Op.JUMP_IF_FALSE_PEEK,
   Op.JUMP_IF_TRUE_PEEK,
   Op.LOOP,
+  Op.TRY,
   Op.CLOSE_UPVALUES,
 ])
 
@@ -222,6 +234,7 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
         case Op.JUMP_IF_FALSE:
         case Op.JUMP_IF_FALSE_PEEK:
         case Op.JUMP_IF_TRUE_PEEK:
+        case Op.TRY:
           note(`-> ${pad(addr + 3 + operand, 4)}`)
           break
         case Op.LOOP:

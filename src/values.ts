@@ -13,6 +13,33 @@ export class RuntimeError extends Error {
 }
 
 /**
+ * 用户 throw 出去的值。借 JS 异常做非局部跳转（与 break/continue/return 同一套路），
+ * 树遍历器靠它穿透递归调用，字节码 VM 靠它穿透帧。line/col 是 throw 语句自己的位置：
+ * 一路没人接住时，报错就得用它。
+ */
+export class ThrowSignal extends Error {
+  constructor(
+    public value: Value,
+    public line: number,
+    public col: number
+  ) {
+    super(`[line ${line}, col ${col}] throw`)
+    this.name = 'ThrowError'
+  }
+}
+
+/** 没人接住的 throw 显示成什么：文案只由这里产出，两个后端才能逐字一致 */
+export const uncaughtThrowMessage = (v: Value): string =>
+  `throw 抛出的值未被捕获：${formatValue(v)}`
+
+/**
+ * catch 到的值：语言内部与内建函数的运行时错误给的是它的中文消息（去掉内部位置前缀），
+ * 用户 throw 的东西则原样给出。cha 还没有「错误对象」这种类型，消息字符串是最省心的选择。
+ */
+export const caughtValue = (e: RuntimeError): string =>
+  e.message.replace(/^\[line \d+, col \d+\] /, '')
+
+/**
  * 调用深度上限。树遍历器消耗的是 JS 调用栈，VM 只在自己的帧数组上增长，
  * 两边都在进函数前检查同一个数，失控递归才能得到同一条中文错误（带调用点行列），
  * 而不是一个泄漏 RangeError、另一个无声涨内存。

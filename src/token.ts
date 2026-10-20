@@ -23,6 +23,9 @@ export type TokenType =
   | 'OR'
   | 'BREAK'
   | 'CONTINUE'
+  | 'TRY'
+  | 'CATCH'
+  | 'THROW'
   // 单字符标点
   | 'LEFT_PAREN'
   | 'RIGHT_PAREN'

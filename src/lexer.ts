@@ -26,6 +26,9 @@ const KEYWORDS: Record<string, TokenType> = {
   or: 'OR',
   break: 'BREAK',
   continue: 'CONTINUE',
+  try: 'TRY',
+  catch: 'CATCH',
+  throw: 'THROW',
 }
 
 const ESCAPES: Record<string, string> = {

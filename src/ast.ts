@@ -209,6 +209,24 @@ export interface ContinueStmt {
   col: number
 }
 
+/** throw 语句：抛出任意值，catch 到的就是它 */
+export interface ThrowStmt {
+  type: 'throw'
+  value: Expr
+  line: number
+  col: number
+}
+
+/** try/catch：body 与 catch 体各自是一层作用域，catchParam 只活在 catch 体里 */
+export interface TryStmt {
+  type: 'try'
+  body: Stmt[]
+  catchParam: string
+  catchBody: Stmt[]
+  line: number
+  col: number
+}
+
 /** fn 声明：把具名函数绑定到当前作用域 */
 export interface FnDeclStmt {
   type: 'fnDecl'
@@ -227,6 +245,8 @@ export type Stmt =
   | ReturnStmt
   | BreakStmt
   | ContinueStmt
+  | ThrowStmt
+  | TryStmt
   | FnDeclStmt
 
 export type Program = Stmt[]

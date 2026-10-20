@@ -4,6 +4,7 @@ import { parse, ParseError } from './parser'
 import { ResolveError, resolve } from './resolver'
 import { compile, FunctionCompiler } from './compiler'
 import { disassemble, type VMFunction } from './chunk'
+import { ThrowSignal, uncaughtThrowMessage } from './values'
 import { VirtualMachine } from './vm'
 import type { ReadLine } from './builtins'
 
@@ -17,6 +18,7 @@ export interface ChaErrorInfo {
   message: string
   line: number
   col: number
+  /** 用户 throw 没被接住时是 'ThrowError'，其余按出错阶段命名 */
   phase: 'lex' | 'parse' | 'resolve' | 'runtime'
 }
 
@@ -76,6 +78,16 @@ function toErrorInfo(e: unknown): ChaErrorInfo {
     return {
       name: e.name,
       message: stripPosition(e.message),
+      line: e.line,
+      col: e.col,
+      phase: 'runtime',
+    }
+  }
+  if (e instanceof ThrowSignal) {
+    // 一路没人接住的 throw：位置就是 throw 语句自己
+    return {
+      name: e.name,
+      message: uncaughtThrowMessage(e.value),
       line: e.line,
       col: e.col,
       phase: 'runtime',

@@ -15,6 +15,8 @@ import {
   MAX_CALL_DEPTH,
   RuntimeError,
   TOO_DEEP_MESSAGE,
+  ThrowSignal,
+  caughtValue,
   formatNumber,
   formatValue,
   isTruthy,
@@ -29,12 +31,27 @@ import { createBuiltins, type ReadLine } from './builtins'
 /** 字节码后端的运行时函数值：树遍历器的函数值形状 + chunk/upvalues */
 export type VMClosure = ChaFunction & { chunk: Chunk; upvalues: Upvalue[] }
 
+/** 一个 try 登记的处理器：catch 入口 + 进入 try 时的栈深 */
+interface Handler {
+  catchIp: number
+  depth: number
+}
+
 interface Frame {
   closure: VMClosure
   /** 返回地址（字节码下标） */
   ip: number
   /** 本帧栈槽窗口的起始下标：参数在 base..base+arity-1 */
   base: number
+  /** 帧内活跃的 try 处理器栈；没有 try 时不分配 */
+  handlers: Handler[] | null
+}
+
+/** catch 到的值：throw 出去什么就是什么；内建与语言内部的错误给那条中文消息 */
+function catchValueOf(e: unknown): Value | undefined {
+  if (e instanceof ThrowSignal) return e.value
+  if (e instanceof RuntimeError) return caughtValue(e)
+  return undefined
 }
 
 export interface VMOptions {
@@ -75,7 +92,12 @@ export class VirtualMachine {
   /** 执行一个顶层函数原型（compile() 的产物），直至 RETURN */
   execute(proto: VMFunction): void {
     this.loops = 0
-    this.frames.push({ closure: this.makeClosure(proto, []), ip: 0, base: 0 })
+    // 上一次运行可能出错停在半路：unwind 会把帧弹光，栈高却留在任意位置。
+    // 顶层帧固定从 base 0 开始，所以这里必须把栈恢复到干净状态。
+    this.frames.length = 0
+    this.openUpvalues.length = 0
+    this.sp = 0
+    this.frames.push({ closure: this.makeClosure(proto, []), ip: 0, base: 0, handlers: null })
     this.run()
   }
 
@@ -92,7 +114,45 @@ export class VirtualMachine {
 
   // ---------- 主循环 ----------
 
+  /**
+   * 跑到底：指令循环一出错就先去登记过的处理器里找落点，接住了就从中断处继续跑；
+   * 一路没人接就把错误原样交给宿主（run()/runVM() 折算成结构化信息）。
+   */
   private run(): void {
+    for (;;) {
+      try {
+        this.dispatch()
+        return
+      } catch (e) {
+        if (!this.unwind(e)) throw e
+      }
+    }
+  }
+
+  /** 把错误交给本帧或某个调用者的 catch */
+  private unwind(e: unknown): boolean {
+    const value = catchValueOf(e)
+    if (value === undefined) return false // return / break / continue 不是错误，原样往上抛
+    while (this.frames.length > 0) {
+      const frame = this.frames[this.frames.length - 1]!
+      const handler = frame.handlers?.pop()
+      if (handler) {
+        // catch 体眼前的世界：try 里的临时值全部消失，抛出值压在栈顶（槽位就是 catch 参数）
+        this.closeUpvaluesFrom(handler.depth)
+        this.sp = handler.depth
+        this.stack[this.sp++] = value
+        frame.ip = handler.catchIp
+        return true
+      }
+      // 本帧没人接：关掉它的 upvalue、弹帧，到调用者里接着找
+      this.closeUpvaluesFrom(frame.base)
+      this.frames.pop()
+      this.sp = frame.base - 1
+    }
+    return false
+  }
+
+  private dispatch(): void {
     const stack = this.stack
     let frame = this.frames[this.frames.length - 1]!
     let code = frame.closure.chunk.code
@@ -353,6 +413,22 @@ export class VirtualMachine {
           break
         }
 
+        case Op.TRY: {
+          const offset = code[ip]! | (code[ip + 1]! << 8)
+          ip += 2
+          const handlers = frame.handlers ?? (frame.handlers = [])
+          handlers.push({ catchIp: ip + offset, depth: this.sp })
+          break
+        }
+        case Op.END_TRY:
+          // try 体正常走完：这个 catch 不再接收后面的错误
+          frame.handlers?.pop()
+          break
+        case Op.THROW: {
+          const value = stack[--this.sp]!
+          throw new ThrowSignal(value, lines[start]!, cols[start]!)
+        }
+
         case Op.CALL: {
           const argc = code[ip++]!
           const callee = stack[this.sp - 1 - argc]!
@@ -392,7 +468,7 @@ export class VirtualMachine {
               frame.ip = ip
               // 顶层脚本帧不算一次 cha 调用，减掉才能和树遍历器的 depth 同点触发
               if (this.frames.length - 1 >= MAX_CALL_DEPTH) throw err(start, TOO_DEEP_MESSAGE)
-              this.frames.push({ closure: fn, ip: 0, base: this.sp - argc })
+              this.frames.push({ closure: fn, ip: 0, base: this.sp - argc, handlers: null })
               frame = this.frames[this.frames.length - 1]!
               code = frame.closure.chunk.code
               lines = frame.closure.chunk.lines

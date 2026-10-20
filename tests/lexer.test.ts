@@ -38,13 +38,17 @@ describe('基础 token', () => {
   })
 
   it('关键字与标识符', () => {
-    expect(types('var fn if else while for return true false nil and or break continue')).toEqual([
+    expect(
+      types('var fn if else while for return true false nil and or break continue try catch throw')
+    ).toEqual([
       'VAR', 'FN', 'IF', 'ELSE', 'WHILE', 'FOR', 'RETURN', 'TRUE', 'FALSE',
-      'NIL', 'AND', 'OR', 'BREAK', 'CONTINUE', 'EOF',
+      'NIL', 'AND', 'OR', 'BREAK', 'CONTINUE', 'TRY', 'CATCH', 'THROW', 'EOF',
     ])
     expect(types('variable ifx for_ _x')).toEqual([
       'IDENTIFIER', 'IDENTIFIER', 'IDENTIFIER', 'IDENTIFIER', 'EOF',
     ])
+    // 新关键字保留：拿它当变量名就不再是标识符了
+    expect(types('try 名字')).toEqual(['TRY', 'IDENTIFIER', 'EOF'])
   })
 
   it('中文变量名是一等公民', () => {
