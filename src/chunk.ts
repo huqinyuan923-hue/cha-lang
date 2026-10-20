@@ -14,9 +14,6 @@ export enum Op {
   TRUE,
   FALSE,
   POP,
-  /** 复制栈顶 1 / 2 个值：[a]→[a,a]，[a,b]→[a,b,a,b] */
-  DUP,
-  DUP2,
   /** 交换栈顶两个值 */
   SWAP,
 

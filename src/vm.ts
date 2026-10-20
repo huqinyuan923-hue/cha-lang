@@ -198,15 +198,6 @@ export class VirtualMachine {
         case Op.POP:
           this.sp--
           break
-        case Op.DUP:
-          stack[this.sp] = stack[this.sp - 1]!
-          this.sp++
-          break
-        case Op.DUP2:
-          stack[this.sp] = stack[this.sp - 2]!
-          stack[this.sp + 1] = stack[this.sp - 1]!
-          this.sp += 2
-          break
         case Op.SWAP: {
           const top = stack[this.sp - 1]!
           stack[this.sp - 1] = stack[this.sp - 2]!

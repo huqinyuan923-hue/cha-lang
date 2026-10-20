@@ -997,8 +997,14 @@ describe('VM 专属：字节码与反汇编', () => {
     expect(text).toContain('METHOD')
     expect(text).toContain('INHERIT')
     expect(text).toContain('GET_SUPER_METHOD')
-    // 方法帧的 this 固定在槽位 0
-    expect(text).toMatch(/GET_LOCAL\s+0/)
+  })
+
+  it('方法帧里的 this 编译成槽位 0 的 GET_LOCAL', () => {
+    const text = disassemble(compile(parse('class A { m() { return this; } }')))
+    // 只看 A.m 自己那一帧：整份输出里别处也可能出现 GET_LOCAL 0
+    const frame = text.split(/(?=^== )/m).find((s) => s.startsWith('== A.m '))
+    expect(frame).toBeDefined()
+    expect(frame).toMatch(/GET_LOCAL\s+0\b/)
   })
 
   it('反汇编展示 TRY / END_TRY / THROW 三件套', () => {
