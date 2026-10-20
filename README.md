@@ -6,7 +6,8 @@
 > 两个可互换的执行后端——树遍历求值器与字节码编译器 + 栈式虚拟机。
 > 零运行时依赖，`src/index.ts` 是纯模块（不依赖 Node API），可以直接编译进浏览器 Playground。
 
-**在线体验**：<https://cha.adcakeyuan.top> —— 浏览器内编辑运行、双后端一键切换、可查看编译出的字节码。
+**在线体验**：<https://cha.adcakeyuan.top> —— 浏览器内编辑运行、双后端一键切换、可查看编译出的字节码，
+还能采集并回放字节码执行轨迹（当前指令、调用栈与栈顶快照，最长 5000 步）。
 
 <p align="center">
   <img src="docs/playground.png" width="49%" alt="Cha Playground：左侧编辑源码，右侧实时输出" />
@@ -228,10 +229,10 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
   → src/index.ts       对外 API：run() / runVM() / Session / VMSession（纯模块，可进浏览器）
   → src/diagnostic.ts  错误片段：源码行 + 显示宽度感知的插入符（CLI 与 Playground 共用）
   → src/cli.ts / repl.ts   命令行与交互环境
-  → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
+  → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图 + 执行轨迹回放）
 ```
 
-两个后端由 **210 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
+两个后端由 **217 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -264,7 +265,7 @@ printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 st
 ## 测试
 
 ```bash
-pnpm test        # 全量 210 个用例（含差分与模糊测试）
+pnpm test        # 全量 217 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
@@ -277,6 +278,7 @@ pnpm test:watch  # 开发模式
 - [x] 类与继承（`init` 构造、字段自由生长、方法共享、`this`、单继承与词法 `super`；方法帧把接收者放槽位 0，两个后端逐字一致）
 - [x] 错误片段（CLI/Playground 共用 `src/diagnostic.ts`：中文/emoji/组合符/tab 感知的插入符与长行裁剪；REPL 因跨段输入刻意不抄源码）
 - [x] try/catch 错误处理（`throw` 扔的是值不是异常对象，运行时错误也能接住、接到的是那句中文消息；`return`/`break`/`continue` 穿过 `try` 时处理器跟着帧一起退，非局部控制流两个后端逐字一致）
+- [x] 执行轨迹回放（VM 逐指令记录函数/地址/行列/调用栈/栈顶快照，Playground 支持播放/暂停、逐步与进度条；上限 5000 步，截断不影响程序完整执行）
 - [ ] 自动分号插入（也许永远不做）
 
 ## 系列文章

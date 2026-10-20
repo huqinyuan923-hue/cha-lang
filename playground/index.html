@@ -41,6 +41,7 @@
     --dim: #a89a86; --accent: #d9a441; --ok: #7fb069; --err: #e07a5f; --flow: #7fa8d9; --mono: ui-monospace, 'Cascadia Code', Consolas, 'Noto Sans SC', monospace;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   textarea:focus-visible, #output:focus-visible { outline-offset: -2px; }
   .sr-only {
@@ -80,6 +81,23 @@
   .err-caret { color: var(--err); font-weight: 700; }
   .out-line { color: var(--text); }
   .meta { color: var(--dim); }
+  .trace-panel { flex: 0 0 auto; max-height: 45%; overflow: auto; border-top: 1px solid var(--line); padding: 8px 14px 12px; font-size: 12px; }
+  .trace-panel:focus-visible { outline-offset: -2px; }
+  .trace-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .trace-bar button { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  #traceRange { flex: 1 1 110px; min-width: 80px; accent-color: var(--accent); }
+  .trace-body { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .trace-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .trace-label { color: var(--dim); }
+  .trace-frames { color: var(--flow); overflow-wrap: anywhere; }
+  .trace-window { border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+  .trace-line { padding: 2px 8px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
+  .trace-line.current { color: var(--text); background: #26221a; border-left: 3px solid var(--accent); padding-left: 5px; font-weight: 600; }
+  .trace-stack { display: flex; flex-direction: column; gap: 2px; max-height: 84px; overflow: auto; }
+  .trace-slot { overflow-wrap: anywhere; }
+  .trace-slot-index { color: var(--dim); display: inline-block; min-width: 38px; }
+  .trace-note { color: var(--accent); }
+  .trace-empty { margin-top: 6px; }
   .noscript { margin: 0; padding: 10px 16px; background: #2e2a22; color: var(--text); border-bottom: 1px solid var(--line); font-size: 13px; text-align: center; }
   @media (max-width: 800px) {
     main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
@@ -91,6 +109,7 @@
     .controls select { flex: 1 1 calc(50% - 3px); min-width: 0; }
     .controls button, .controls .link-btn { flex: 0 0 auto; padding: 6px 10px; }
     select, button, textarea, .link-btn { font-size: 16px; }
+    .trace-panel { max-height: 55%; }
   }
 </style>
 </head>
@@ -128,10 +147,31 @@
       <span class="pane-tools">
         <button id="copy" type="button" title="复制输出文本">复制</button>
         <label><input type="checkbox" id="showDisasm" /> 字节码视图</label>
+        <label title="仅字节码 VM 后端；点「运行」采集轨迹"><input type="checkbox" id="showTrace" /> 执行轨迹</label>
       </span>
     </div>
     <span id="status" class="sr-only" role="status" aria-live="polite"></span>
     <pre id="output" aria-label="运行输出" tabindex="0"></pre>
+    <div id="tracePanel" class="trace-panel" role="region" aria-label="执行轨迹" tabindex="0" hidden>
+      <div class="trace-bar">
+        <button id="traceFirst" type="button" aria-label="回到开头" title="回到开头（Home）">⏮</button>
+        <button id="tracePrev" type="button" aria-label="上一步" title="上一步（←）">◀</button>
+        <button id="tracePlay" type="button" aria-label="播放轨迹" title="播放/暂停（空格）">▶ 播放</button>
+        <button id="traceNext" type="button" aria-label="下一步" title="下一步（→）">▶</button>
+        <button id="traceLast" type="button" aria-label="跳到末尾" title="跳到末尾（End）">⏭</button>
+        <input id="traceRange" type="range" min="0" max="0" value="0" step="1" aria-label="轨迹进度" />
+        <span id="traceCount" class="meta">第 0 / 0 步</span>
+      </div>
+      <div id="traceEmpty" class="trace-empty meta">按「运行」采集轨迹</div>
+      <div id="traceBody" class="trace-body" hidden>
+        <div class="trace-head"><span class="trace-label">调用栈</span><span id="traceFrames" class="trace-frames"></span></div>
+        <div class="trace-label">当前指令</div>
+        <div id="traceWindow" class="trace-window"></div>
+        <div class="trace-head"><span class="trace-label">栈快照</span><span id="traceStackInfo" class="meta"></span></div>
+        <div id="traceStack" class="trace-stack"></div>
+        <div id="traceNote" class="trace-note" hidden></div>
+      </div>
+    </div>
   </section>
 </main>
 <script src="./bundle.js"></script>

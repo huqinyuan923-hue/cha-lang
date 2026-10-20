@@ -6,12 +6,14 @@ import { compile, FunctionCompiler } from './compiler'
 import { disassemble, type VMFunction } from './chunk'
 import { ThrowSignal, uncaughtThrowMessage } from './values'
 import { VirtualMachine } from './vm'
+import type { VMOptions, VMTraceStep } from './vm'
 import type { ReadLine } from './builtins'
 
 export { RuntimeError }
 export { compile, FunctionCompiler }
 export { disassemble }
 export type { VMFunction }
+export type { VMTraceStep }
 export { formatDiagnostic, formatErrorHeader, sourceExcerpt } from './diagnostic'
 export type { DiagnosticInfo, DiagnosticOptions, ExcerptOptions } from './diagnostic'
 
@@ -39,6 +41,10 @@ export interface RunOptions {
   readLine?: ReadLine
   /** 循环轮数预算：宿主按自己能容忍的卡顿时长决定，两个后端拿同一个数 */
   loopBudget?: number
+  /** 字节码 VM 的逐指令轨迹回调；树遍历后端忽略 */
+  trace?: VMOptions['trace']
+  /** 轨迹最多记录多少步；树遍历后端忽略 */
+  traceLimit?: number
 }
 
 /**
@@ -154,6 +160,8 @@ export function runVM(source: string, options: RunOptions = {}): RunResult {
       clock: options.clock,
       readLine: options.readLine,
       loopBudget: options.loopBudget,
+      trace: options.trace,
+      traceLimit: options.traceLimit,
     })
     vm.execute(proto)
     return { output }

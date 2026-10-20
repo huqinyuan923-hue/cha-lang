@@ -252,6 +252,15 @@ function formatKey(k: Value): string {
   return formatValue(k)
 }
 
+/**
+ * 轨迹快照里的值文本：formatValue 之后截断，避免一个超长数组/字符串
+ * 在 5000 条轨迹里把浏览器内存吃光。
+ */
+export function formatTraceValue(v: Value, max = 60): string {
+  const text = formatValue(v)
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
 /** str() 与 print() 的区别：字符串会带引号 */
 export function inspectValue(v: Value): string {
   if (typeof v === 'string') return `"${v}"`

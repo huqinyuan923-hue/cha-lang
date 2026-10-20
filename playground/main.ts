@@ -3,7 +3,7 @@
  * src/index 不依赖 Node API，这里是唯一接触 DOM 的地方。
  */
 import { formatDiagnostic, formatErrorHeader, run as runTree, runVM, sourceExcerpt } from '../src/index'
-import type { ChaErrorInfo, RunResult } from '../src/index'
+import type { ChaErrorInfo, RunOptions, RunResult, VMTraceStep } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
@@ -16,6 +16,22 @@ const status = document.getElementById('status') as HTMLElement | null
 const backendSel = document.getElementById('backend') as HTMLSelectElement
 const exampleSel = document.getElementById('example') as HTMLSelectElement
 const showDisasm = document.getElementById('showDisasm') as HTMLInputElement
+const showTrace = document.getElementById('showTrace') as HTMLInputElement
+const tracePanel = document.getElementById('tracePanel') as HTMLDivElement
+const traceBody = document.getElementById('traceBody') as HTMLDivElement
+const traceEmpty = document.getElementById('traceEmpty') as HTMLDivElement
+const traceNote = document.getElementById('traceNote') as HTMLDivElement
+const traceWindow = document.getElementById('traceWindow') as HTMLDivElement
+const traceStack = document.getElementById('traceStack') as HTMLDivElement
+const traceFrames = document.getElementById('traceFrames') as HTMLSpanElement
+const traceStackInfo = document.getElementById('traceStackInfo') as HTMLSpanElement
+const traceCount = document.getElementById('traceCount') as HTMLSpanElement
+const traceRange = document.getElementById('traceRange') as HTMLInputElement
+const traceFirst = document.getElementById('traceFirst') as HTMLButtonElement
+const tracePrev = document.getElementById('tracePrev') as HTMLButtonElement
+const tracePlay = document.getElementById('tracePlay') as HTMLButtonElement
+const traceNext = document.getElementById('traceNext') as HTMLButtonElement
+const traceLast = document.getElementById('traceLast') as HTMLButtonElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
 const shareBtn = document.getElementById('share') as HTMLButtonElement | null
 const copyBtn = document.getElementById('copy') as HTMLButtonElement | null
@@ -138,6 +154,16 @@ print(a.陈化(2).介绍());
 print(b.介绍());
 print(b.名字, b["年份"]);
 try { print(a.产地); } catch (消息) { print("查不到：", 消息); }`,
+  '执行轨迹演示': `// 勾选右上角「执行轨迹」再点「运行」，然后播放/逐步回放每条字节码
+fn 加(a, b) {
+    var 和 = a + b;
+    return 和;
+}
+var 总数 = 0;
+for (var i = 1; i <= 3; i += 1) {
+    总数 = 加(总数, i);
+}
+print("总数 = \${总数}");`,
   '运行时错误演示': `// 出错也不怕：输出区会给出准确的错误名、行号与列号
 print("这行会先执行");
 var 结果 = 未知变量 + 1;
@@ -172,11 +198,17 @@ const MAX_OUTPUT_LINES = 2000
  * 200 万轮最多卡 400 毫秒。示例里最重的循环是 20 万轮，离预算还差一个数量级。
  */
 const LOOP_BUDGET = 2_000_000
+/** 轨迹最多记录/回放多少步：足够覆盖教学示例，又不会把浏览器拖垮 */
+const MAX_TRACE_STEPS = 5000
+const TRACE_PLAY_MS = 120
+const TRACE_WINDOW_BEFORE = 2
+const TRACE_WINDOW_AFTER = 2
 
 interface SavedState {
   code: string
   backend: 'vm' | 'tree'
   disasm: boolean
+  trace: boolean
   example: string
 }
 
@@ -210,6 +242,7 @@ function saveState(): void {
       code: editor.value,
       backend: backendSel.value === 'tree' ? 'tree' : 'vm',
       disasm: showDisasm.checked,
+      trace: showTrace.checked,
       example: exampleSel.value,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
@@ -228,6 +261,7 @@ function loadState(): SavedState | null {
       code: parsed.code,
       backend: parsed.backend === 'tree' ? 'tree' : 'vm',
       disasm: parsed.disasm === true,
+      trace: parsed.trace === true,
       example: typeof parsed.example === 'string' ? parsed.example : '',
     }
   } catch {
@@ -293,21 +327,174 @@ function paintResult(result: RunResult, ms: number, src: string): void {
   output.scrollTop = 0
 }
 
+// ---------- 执行轨迹：记录 + 回放 ----------
+
+let traceSteps: VMTraceStep[] = []
+let traceIndex = 0
+let traceTimer: number | undefined
+let traceTruncated = false
+
+const TRACE_BUTTONS = [traceFirst, tracePrev, tracePlay, traceNext, traceLast]
+
+function stopTracePlayback(): void {
+  if (traceTimer !== undefined) {
+    window.clearInterval(traceTimer)
+    traceTimer = undefined
+  }
+  tracePlay.textContent = '▶ 播放'
+  tracePlay.setAttribute('aria-label', '播放轨迹')
+}
+
+function resetTrace(): void {
+  stopTracePlayback()
+  traceSteps = []
+  traceIndex = 0
+  traceTruncated = false
+}
+
+function updateTraceVisibility(): void {
+  const isVm = backendSel.value !== 'tree'
+  showTrace.disabled = !isVm
+  tracePanel.hidden = !isVm || !showTrace.checked
+}
+
+function renderTrace(): void {
+  updateTraceVisibility()
+  const total = traceSteps.length
+  const hasSteps = total > 0
+  traceBody.hidden = !hasSteps
+  traceEmpty.hidden = hasSteps
+  traceRange.disabled = !hasSteps
+  for (const button of TRACE_BUTTONS) button.disabled = !hasSteps
+  traceRange.max = String(Math.max(0, total - 1))
+
+  if (!hasSteps) {
+    traceIndex = 0
+    traceRange.value = '0'
+    traceRange.setAttribute('aria-valuetext', '暂无轨迹')
+    traceCount.textContent = '第 0 / 0 步'
+    traceFrames.textContent = '—'
+    traceStackInfo.textContent = ''
+    traceStack.textContent = '（空）'
+    traceWindow.replaceChildren()
+    traceNote.hidden = true
+    traceNote.textContent = ''
+    return
+  }
+
+  traceIndex = Math.max(0, Math.min(total - 1, traceIndex))
+  const step = traceSteps[traceIndex]!
+  traceRange.value = String(traceIndex)
+  traceRange.setAttribute('aria-valuetext', `第 ${traceIndex + 1} 步，共 ${total} 步`)
+  traceCount.textContent = `第 ${traceIndex + 1} / ${total} 步`
+
+  const hidden = step.depth > step.frames.length ? '… › ' : ''
+  traceFrames.textContent = `${hidden}${step.frames.join(' › ')}（深度 ${step.depth}）`
+
+  traceWindow.replaceChildren(...traceWindowRows())
+  renderTraceStack(step)
+
+  traceNote.hidden = !traceTruncated
+  traceNote.textContent = traceTruncated
+    ? `轨迹只记录了前 ${MAX_TRACE_STEPS} 步，程序本身已完整执行`
+    : ''
+}
+
+/** 当前步前后各 2 步，全部用 textContent 生成（轨迹内容来自用户程序） */
+function traceWindowRows(): HTMLElement[] {
+  const from = Math.max(0, traceIndex - TRACE_WINDOW_BEFORE)
+  const to = Math.min(traceSteps.length, traceIndex + TRACE_WINDOW_AFTER + 1)
+  const rows: HTMLElement[] = []
+  for (let i = from; i < to; i += 1) {
+    const step = traceSteps[i]!
+    const row = document.createElement('div')
+    row.className = i === traceIndex ? 'trace-line current' : 'trace-line'
+    if (i === traceIndex) row.setAttribute('aria-current', 'step')
+    const marker = i === traceIndex ? '▶' : ' '
+    row.textContent = `${marker} ${step.fn}  ${String(step.addr).padStart(4, ' ')}  ${step.op.padEnd(18, ' ')} ${step.line}:${step.col}`
+    rows.push(row)
+  }
+  return rows
+}
+
+function renderTraceStack(step: VMTraceStep): void {
+  const slots = step.stack.map((item) => {
+    const row = document.createElement('div')
+    row.className = 'trace-slot'
+    const index = document.createElement('span')
+    index.className = 'trace-slot-index'
+    index.textContent = `[${item.slot}]`
+    row.append(index, document.createTextNode(` ${item.text}`))
+    return row
+  })
+  if (slots.length === 0) {
+    traceStack.textContent = '（空）'
+  } else {
+    traceStack.replaceChildren(...slots)
+  }
+  const overflow = step.sp - step.base > step.stack.length
+  traceStackInfo.textContent = `执行前 · sp=${step.sp}${overflow ? ' · 只显示栈顶 8 个槽位' : ''}`
+}
+
+function goTrace(next: number): void {
+  if (traceSteps.length === 0) return
+  stopTracePlayback()
+  traceIndex = Math.max(0, Math.min(traceSteps.length - 1, next))
+  renderTrace()
+}
+
+function startTracePlayback(): void {
+  if (traceSteps.length === 0 || traceTimer !== undefined) return
+  if (traceIndex >= traceSteps.length - 1) traceIndex = 0
+  tracePlay.textContent = '⏸ 暂停'
+  tracePlay.setAttribute('aria-label', '暂停轨迹')
+  traceTimer = window.setInterval(() => {
+    if (traceIndex >= traceSteps.length - 1) {
+      stopTracePlayback()
+      return
+    }
+    traceIndex += 1
+    renderTrace()
+  }, TRACE_PLAY_MS)
+  renderTrace()
+}
+
+function toggleTracePlayback(): void {
+  if (traceTimer !== undefined) stopTracePlayback()
+  else startTracePlayback()
+}
+
 function render(src: string, interactive = false): void {
   const t0 = performance.now()
   const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
   inputWasSkipped = false
+  resetTrace()
+  updateTraceVisibility()
+  // 只有显式运行、勾选轨迹、且是 VM 后端时才记录；打字自动重跑走无 trace 快路径
+  const collectTrace = interactive && backend === 'vm' && showTrace.checked
   const readLine = interactive ? dialogReader : silentReader
-  const result =
-    backend === 'vm'
-      ? runVM(src, { readLine, loopBudget: LOOP_BUDGET })
-      : runTree(src, { readLine, loopBudget: LOOP_BUDGET })
+  const steps: VMTraceStep[] = []
+  const runOptions: RunOptions = { readLine, loopBudget: LOOP_BUDGET }
+  if (collectTrace) {
+    runOptions.trace = (step) => steps.push(step)
+    runOptions.traceLimit = MAX_TRACE_STEPS
+  }
+  const result = backend === 'vm' ? runVM(src, runOptions) : runTree(src, runOptions)
   const ms = performance.now() - t0
   const backendName = backend === 'vm' ? '字节码 VM' : '树遍历'
   timing.textContent = `${backendName} · ${ms.toFixed(1)}ms`
   paintResult(result, ms, src)
+  if (collectTrace) {
+    traceSteps = steps
+    traceIndex = 0
+    traceTruncated = steps.length >= MAX_TRACE_STEPS
+  }
+  renderTrace()
   if (inputWasSkipped) {
     setStatus(`${status?.textContent ?? ''} · 代码里的 input() 返回 nil，按「运行」才会弹窗要输入`)
+  }
+  if (backend === 'tree' && showTrace.checked) {
+    setStatus(`${status?.textContent ?? ''} · 执行轨迹仅支持字节码 VM 后端`)
   }
 }
 
@@ -417,6 +604,9 @@ let inputTimer: number | undefined
 
 function scheduleRender(): void {
   exampleSel.value = ''
+  // 代码一改就丢掉旧轨迹，避免展示与当前代码不符的状态
+  resetTrace()
+  renderTrace()
   if (inputTimer !== undefined) window.clearTimeout(inputTimer)
   inputTimer = window.setTimeout(() => {
     render(editor.value)
@@ -485,6 +675,49 @@ showDisasm.addEventListener('change', () => {
   render(editor.value)
   saveState()
 })
+showTrace.addEventListener('change', () => {
+  resetTrace()
+  renderTrace()
+  saveState()
+})
+traceFirst.addEventListener('click', () => goTrace(0))
+tracePrev.addEventListener('click', () => goTrace(traceIndex - 1))
+traceNext.addEventListener('click', () => goTrace(traceIndex + 1))
+traceLast.addEventListener('click', () => goTrace(traceSteps.length - 1))
+tracePlay.addEventListener('click', toggleTracePlayback)
+traceRange.addEventListener('input', () => {
+  stopTracePlayback()
+  traceIndex = Number(traceRange.value) || 0
+  renderTrace()
+})
+tracePanel.addEventListener('keydown', (event) => {
+  if (traceSteps.length === 0) return
+  // 滑块自己处理方向键，按钮自己处理空格/回车
+  if (event.target instanceof HTMLInputElement) return
+  switch (event.key) {
+    case 'ArrowLeft':
+      event.preventDefault()
+      goTrace(traceIndex - 1)
+      break
+    case 'ArrowRight':
+      event.preventDefault()
+      goTrace(traceIndex + 1)
+      break
+    case 'Home':
+      event.preventDefault()
+      goTrace(0)
+      break
+    case 'End':
+      event.preventDefault()
+      goTrace(traceSteps.length - 1)
+      break
+    case ' ':
+      if (event.target instanceof HTMLButtonElement) return
+      event.preventDefault()
+      toggleTracePlayback()
+      break
+  }
+})
 editor.addEventListener('input', scheduleRender)
 editor.addEventListener('keydown', (event) => {
   if (event.isComposing || event.keyCode === 229) return
@@ -535,17 +768,20 @@ if (shared) {
   editor.value = shared.code
   backendSel.value = shared.backend
   showDisasm.checked = false
+  showTrace.checked = false
   exampleSel.value = ''
   history.replaceState(null, '', location.pathname + location.search)
 } else if (saved) {
   editor.value = saved.code
   backendSel.value = saved.backend
   showDisasm.checked = saved.disasm
+  showTrace.checked = saved.trace
   exampleSel.value = saved.example && EXAMPLES[saved.example] === saved.code ? saved.example : ''
 } else {
   editor.value = EXAMPLES[DEFAULT_EXAMPLE]!
   backendSel.value = 'vm'
   showDisasm.checked = false
+  showTrace.checked = false
   exampleSel.value = DEFAULT_EXAMPLE
 }
 render(editor.value)

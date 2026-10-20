@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { run, runVM, Session, VMSession, type RunOptions } from '../src/index'
+import { run, runVM, Session, VMSession, type RunOptions, type VMTraceStep } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
@@ -985,6 +985,120 @@ describe('VM 与树遍历器差分：类与继承', () => {
       `,
       ['接住 实例 A 没有属性 \'x\'', '接住 类 A() 需要 0 个参数，收到 1 个', '继续']
     )
+  })
+})
+
+describe('VM 执行轨迹', () => {
+  /** 收集轨迹；traceLimit 不传时按 VM 默认（不限） */
+  const collect = (src: string, traceLimit?: number) => {
+    const steps: VMTraceStep[] = []
+    const vm = runVM(
+      src,
+      traceLimit === undefined
+        ? { trace: (step) => steps.push(step) }
+        : { trace: (step) => steps.push(step), traceLimit }
+    )
+    return { steps, vm }
+  }
+
+  it('开启轨迹不改变输出与错误', () => {
+    const ok = 'fn f(n) { if (n <= 1) return 1; return n * f(n - 1); } print(f(5));'
+    const traced = collect(ok).vm
+    expect(traced).toEqual(runVM(ok))
+    expect(traced.output).toEqual(['120'])
+
+    const bad = 'fn f(n) { return f(n - 1) + "x"; } print(f(3));'
+    expect(collect(bad).vm).toEqual(runVM(bad))
+  })
+
+  it('第 0 步是顶层脚本的执行前快照', () => {
+    const { steps } = collect('var x = 1;\nprint(x);')
+    expect(steps.length).toBeGreaterThan(0)
+    const first = steps[0]!
+    expect(first).toMatchObject({
+      step: 0,
+      addr: 0,
+      fn: 'script',
+      arity: 0,
+      upvalues: 0,
+      depth: 1,
+      base: 0,
+      sp: 0,
+      frames: ['script'],
+      stack: [],
+    })
+    expect(first.line).toBeGreaterThan(0)
+    expect(first.col).toBeGreaterThan(0)
+  })
+
+  it('步号连续，函数帧的深度、调用栈与 CALL/RETURN 都可回放', () => {
+    const { steps } = collect('fn f(a) { return a + 1; }\nprint(f(41));')
+    expect(steps.map((s) => s.step)).toEqual(steps.map((_, i) => i))
+
+    const inF = steps.filter((s) => s.fn === 'f')
+    expect(inF.length).toBeGreaterThan(0)
+    expect(inF.every((s) => s.depth === 2 && s.base > 0)).toBe(true)
+    expect(inF[0]!.frames).toEqual(['script', 'f'])
+    expect(inF[0]!.arity).toBe(1)
+
+    const call = steps.find((s) => s.op === 'CALL')!
+    // CALL 执行前：callee 与实参都在脚本帧栈顶（外层 print 的 callee 还在更下面）
+    expect(call.stack.map((item) => item.text).slice(-2)).toEqual(['<fn f>', '41'])
+    expect(steps.some((s) => s.fn === 'f' && s.op === 'RETURN')).toBe(true)
+  })
+
+  it('匿名函数与方法使用可读的函数名', () => {
+    const anon = collect('var f = fn() { return 1; }; print(f());').steps
+    expect(anon.some((s) => s.fn === '匿名函数' && s.depth === 2)).toBe(true)
+
+    const method = collect(
+      'class 茶 { init() { this.x = 1; } 介绍() { return this.x; } }\nvar a = 茶();\nprint(a.介绍());'
+    ).steps
+    expect(method.some((s) => s.fn === '茶.init' && s.depth === 2)).toBe(true)
+    expect(method.some((s) => s.fn === '茶.介绍' && s.depth === 2)).toBe(true)
+    expect(method.find((s) => s.fn === '茶.介绍')!.frames).toEqual(['script', '茶.介绍'])
+  })
+
+  it('traceLimit 截断记录，但程序照常跑完', () => {
+    const { steps, vm } = collect('var s = 0; for (var i = 1; i <= 5; i += 1) { s += i; } print(s);', 7)
+    expect(steps).toHaveLength(7)
+    expect(steps.map((s) => s.step)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(vm.output).toEqual(['15'])
+    expect(vm.error).toBeUndefined()
+  })
+
+  it('运行时错误前的步骤已记录，错误信息与不开轨迹时一致', () => {
+    const src = 'fn f() {\n    return 未定义;\n}\nf();'
+    const { steps, vm } = collect(src)
+    expect(vm).toEqual(runVM(src))
+    expect(vm.error).toMatchObject({ line: 2, phase: 'runtime' })
+    expect(steps.some((s) => s.fn === 'f' && s.depth === 2)).toBe(true)
+  })
+
+  it('栈快照只在 base..sp 内，最多 8 个槽位且值文本截断到 60 字符', () => {
+    const long = 'x'.repeat(80)
+    const src = `fn f() {
+      var a = 1; var b = 2; var c = 3; var d = 4; var e = 5;
+      var 长 = "${long}";
+      var g = 7; var h = 8; var i = 9; var j = 10;
+      return a + b + c + d + e + g + h + i + j + len(长);
+    }
+    print(f());`
+    const { steps } = collect(src)
+    for (const step of steps) {
+      expect(step.stack.length).toBeLessThanOrEqual(8)
+      for (const item of step.stack) {
+        expect(item.slot).toBeGreaterThanOrEqual(step.base)
+        expect(item.slot).toBeLessThan(step.sp)
+        expect(item.slot).toBeGreaterThanOrEqual(step.sp - 8)
+        expect(item.text.length).toBeLessThanOrEqual(60)
+      }
+    }
+    const truncated = steps.find((s) => s.stack.some((item) => item.text.endsWith('…')))
+    expect(truncated).toBeDefined()
+    expect(truncated!.stack.find((item) => item.text.endsWith('…'))!.text).toHaveLength(60)
+    // 局部变量超过 8 个时，快照只保留栈顶 8 个
+    expect(steps.some((s) => s.sp - s.base > 8 && s.stack.length === 8)).toBe(true)
   })
 })
 

@@ -21,6 +21,7 @@ import {
   caughtValue,
   classArityMessage,
   formatNumber,
+  formatTraceValue,
   formatValue,
   instanceKeyMessage,
   instanceMissingPropertyMessage,
@@ -64,13 +65,44 @@ function catchValueOf(e: unknown): Value | undefined {
   return undefined
 }
 
+/** 轨迹里栈快照最多保留的槽位数 */
+const TRACE_STACK_SLOTS = 8
+/** 轨迹里调用栈名字最多保留的层数（取最上面的 N 层） */
+const TRACE_FRAME_NAMES = 16
+
+/** 一条「执行前」快照：回调时 VM 尚未执行 addr 处的指令 */
+export interface VMTraceStep {
+  /** 从 0 开始，VM 侧计数 */
+  step: number
+  /** 当前 chunk 内的指令地址（与反汇编里的地址一致） */
+  addr: number
+  op: string
+  line: number
+  col: number
+  /** 当前函数名：顶层为 'script'，匿名函数为 '匿名函数'，方法为 '茶.init' */
+  fn: string
+  arity: number
+  upvalues: number
+  /** 调用帧数，1 = 顶层 */
+  depth: number
+  /** 当前帧栈槽起点；局部变量在 base..sp-1 */
+  base: number
+  sp: number
+  /** 调用栈函数名，从底到顶；最多保留最后 16 个 */
+  frames: string[]
+  /** 栈顶快照（执行前），最多 8 个槽位；text 已格式化并截断 */
+  stack: { slot: number; text: string }[]
+}
+
 export interface VMOptions {
   output?: (text: string) => void
   clock?: () => number
   /** 循环轮数预算（数循环体进了多少轮，不是指令数）；超了就报错，默认 DEFAULT_LOOP_BUDGET */
   loopBudget?: number
   /** 每条指令执行前的轨迹回调（调试/教学用） */
-  trace?: (info: { addr: number; op: string; sp: number; base: number }) => void
+  trace?: (info: VMTraceStep) => void
+  /** 最多记录多少步；默认 Infinity。到上限后停止回调，程序继续跑 */
+  traceLimit?: number
   /** input() 的数据来源；不提供则 input() 报「宿主没有提供标准输入」 */
   readLine?: ReadLine | null
 }
@@ -88,12 +120,15 @@ export class VirtualMachine {
   private loopBudget: number
   private loops = 0
   private trace?: VMOptions['trace']
+  private traceLimit: number
+  private traceCount = 0
 
   constructor(options: VMOptions = {}) {
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.loopBudget = options.loopBudget ?? DEFAULT_LOOP_BUDGET
     this.trace = options.trace
+    this.traceLimit = options.traceLimit ?? Infinity
     for (const native of createBuiltins(this.output, this.clock, options.readLine ?? null)) {
       this.globals.set(native.name, native)
     }
@@ -102,6 +137,7 @@ export class VirtualMachine {
   /** 执行一个顶层函数原型（compile() 的产物），直至 RETURN */
   execute(proto: VMFunction): void {
     this.loops = 0
+    this.traceCount = 0
     // 上一次运行可能出错停在半路：unwind 会把帧弹光，栈高却留在任意位置。
     // 顶层帧固定从 base 0 开始，所以这里必须把栈恢复到干净状态。
     this.frames.length = 0
@@ -176,8 +212,24 @@ export class VirtualMachine {
 
     while (true) {
       const start = ip
-      if (this.trace) {
-        this.trace({ addr: start, op: Op[code[start]!] ?? `op${code[start]}`, sp: this.sp, base: frame.base })
+      if (this.trace && this.traceCount < this.traceLimit) {
+        const step: VMTraceStep = {
+          step: this.traceCount,
+          addr: start,
+          op: Op[code[start]!] ?? `op${code[start]}`,
+          line: lines[start]!,
+          col: cols[start]!,
+          fn: this.traceName(frame, this.frames.length - 1),
+          arity: frame.closure.params.length,
+          upvalues: frame.closure.upvalues.length,
+          depth: this.frames.length,
+          base: frame.base,
+          sp: this.sp,
+          frames: this.traceFrames(),
+          stack: this.traceStack(frame.base),
+        }
+        this.traceCount++
+        this.trace(step)
       }
       switch (code[ip++]!) {
         case Op.CONST: {
@@ -609,6 +661,33 @@ export class VirtualMachine {
           throw err(start, `内部错误：未知指令 ${code[start]}（位于 ${start}）`)
       }
     }
+  }
+
+  // ---------- 执行轨迹快照 ----------
+
+  /** 顶层帧没有名字；普通函数用编译期名字，匿名函数给一个稳定文案 */
+  private traceName(frame: Frame, index: number): string {
+    return frame.closure.name ?? (index === 0 ? 'script' : '匿名函数')
+  }
+
+  /** 调用栈名字（底 → 顶）。深调用只保留最上面 16 层，depth 仍报真实深度 */
+  private traceFrames(): string[] {
+    const frames: string[] = []
+    const from = Math.max(0, this.frames.length - TRACE_FRAME_NAMES)
+    for (let i = from; i < this.frames.length; i++) {
+      frames.push(this.traceName(this.frames[i]!, i))
+    }
+    return frames
+  }
+
+  /** 栈顶快照：只在 base..sp 的活动窗口里取，最多 8 个槽位 */
+  private traceStack(base: number): { slot: number; text: string }[] {
+    const stack: { slot: number; text: string }[] = []
+    const from = Math.max(base, this.sp - TRACE_STACK_SLOTS)
+    for (let i = from; i < this.sp; i++) {
+      stack.push({ slot: i, text: formatTraceValue(this.stack[i]!) })
+    }
+    return stack
   }
 
   // ---------- 与树遍历器逐字对齐的运行时操作 ----------
