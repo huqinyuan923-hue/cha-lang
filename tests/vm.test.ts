@@ -3,6 +3,7 @@ import { run, runVM, Session, VMSession, type RunOptions, type VMTraceStep } fro
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
+import { formatTraceValue } from '../src/values'
 
 /**
  * 差分断言：字节码 VM 的输出与错误必须和树遍历解释器完全一致。
@@ -1073,6 +1074,23 @@ describe('VM 执行轨迹', () => {
     expect(vm).toEqual(runVM(src))
     expect(vm.error).toMatchObject({ line: 2, phase: 'runtime' })
     expect(steps.some((s) => s.fn === 'f' && s.depth === 2)).toBe(true)
+  })
+
+  it('栈快照记录当时的文本，后续修改数组不会改写历史', () => {
+    const { steps } = collect('var a = [1];\nprint(a);\na[0] = 2;\nprint(a);')
+    const texts = steps.flatMap((s) => s.stack.map((item) => item.text))
+    expect(texts).toContain('[1]')
+    expect(texts).toContain('[2]')
+    const firstOne = steps.find((s) => s.stack.some((item) => item.text === '[1]'))!
+    expect(firstOne.stack.some((item) => item.text === '[2]')).toBe(false)
+  })
+
+  it('超大容器只保留头部预览，轨迹文本始终有界', () => {
+    const big = Array.from({ length: 200_000 }, (_, i) => i)
+    const arrayText = formatTraceValue(big)
+    expect(arrayText.length).toBeLessThanOrEqual(60)
+    expect(arrayText.startsWith('[0, 1, 2, 3, 4, 5, …]')).toBe(true)
+    expect(formatTraceValue('x'.repeat(1_000_000))).toHaveLength(60)
   })
 
   it('栈快照只在 base..sp 内，最多 8 个槽位且值文本截断到 60 字符', () => {

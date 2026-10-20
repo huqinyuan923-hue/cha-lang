@@ -239,7 +239,7 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图 + 执行轨迹回放）
 ```
 
-两个后端由 **232 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
+两个后端由 **234 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -269,10 +269,39 @@ pnpm cha run examples/fib.cha --tree     # 树遍历解释器跑
 printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 stdin
 ```
 
+## 执行轨迹（字节码 VM）
+
+字节码后端可以记录每一条指令执行前的状态：函数、地址、操作码、源码行列、调用深度、调用栈与栈顶快照。
+Playground 勾选「执行轨迹」后点「运行」即可回放——播放/暂停、逐步、首尾跳转、拖动进度条，
+当前指令前后各两条，栈快照最多显示栈顶 8 个槽位，也可以复制当前步。
+
+<p align="center">
+  <img src="docs/playground-trace.png" width="72%" alt="执行轨迹面板：当前指令窗口、调用栈与栈顶快照" />
+</p>
+
+轨迹只在显式点「运行」时采集，打字自动重跑不会记录；上限 5000 步，超过时提示截断但程序照常跑完。
+树遍历后端没有轨迹，复选框会禁用。对比按钮会用 VM 侧的结果重新采集，不会留下上一次的旧轨迹。
+
+也可以直接走 API：
+
+```ts
+import { runVM, type VMTraceStep } from './src/index'
+
+const steps: VMTraceStep[] = []
+runVM(source, {
+  trace: (step) => steps.push(step),
+  traceLimit: 5000,
+})
+```
+
+每条轨迹带 `step`、`addr`、`op`、`line`/`col`、`fn`、`arity`/`upvalues`、`depth`、
+`frames`（最近 16 层）、`stack`（执行前栈顶 8 个槽位）与 `sp`/`base`。值文本在记录时就格式化成字符串，
+修改数组/map 不会改写历史；大数组/大 map 只保留头部预览，避免 5000 条轨迹把内存吃光。
+
 ## 测试
 
 ```bash
-pnpm test        # 全量 232 个用例（含差分与模糊测试）
+pnpm test        # 全量 234 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
@@ -285,7 +314,7 @@ pnpm test:watch  # 开发模式
 - [x] 类与继承（`init` 构造、字段自由生长、方法共享、`this`、单继承与词法 `super`；方法帧把接收者放槽位 0，两个后端逐字一致）
 - [x] 错误片段（CLI/Playground 共用 `src/diagnostic.ts`：中文/emoji/组合符/tab 感知的插入符与长行裁剪；REPL 因跨段输入刻意不抄源码）
 - [x] try/catch 错误处理（`throw` 扔的是值不是异常对象，运行时错误也能接住、接到的是那句中文消息；`return`/`break`/`continue` 穿过 `try` 时处理器跟着帧一起退，非局部控制流两个后端逐字一致）
-- [x] 执行轨迹回放（VM 逐指令记录函数/地址/行列/调用栈/栈顶快照，Playground 支持播放/暂停、逐步与进度条；上限 5000 步，截断不影响程序完整执行）
+- [x] 执行轨迹回放（VM 逐指令记录函数/地址/行列/调用栈/栈顶快照，Playground 支持播放/暂停、逐步、进度条与复制当前步；上限 5000 步，截断不影响程序完整执行）
 - [x] 终端工作流（`cha check` 多文件静态检查、BOM 兼容、REPL 错误行列与跨会话历史）
 - [ ] 自动分号插入（也许永远不做）
 

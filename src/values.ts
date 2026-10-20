@@ -252,13 +252,52 @@ function formatKey(k: Value): string {
   return formatValue(k)
 }
 
+const TRACE_PREVIEW_ITEMS = 6
+const TRACE_PREVIEW_DEPTH = 2
+
 /**
- * 轨迹快照里的值文本：formatValue 之后截断，避免一个超长数组/字符串
- * 在 5000 条轨迹里把浏览器内存吃光。
+ * 轨迹快照里的值文本：容器只取头部与有限深度，绝不把整个大数组/大 map
+ * 拼成字符串——5000 条轨迹每条都全量 formatValue 会直接卡死浏览器。
  */
 export function formatTraceValue(v: Value, max = 60): string {
-  const text = formatValue(v)
+  const text = tracePreview(v, 0)
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function tracePreview(v: Value, depth: number): string {
+  if (typeof v === 'string') return truncateTraceString(v)
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]'
+    if (depth >= TRACE_PREVIEW_DEPTH) return '[…]'
+    const parts = v.slice(0, TRACE_PREVIEW_ITEMS).map((item) => tracePreview(item, depth + 1))
+    if (v.length > TRACE_PREVIEW_ITEMS) parts.push('…')
+    return `[${parts.join(', ')}]`
+  }
+  if (v instanceof ChaMap) {
+    if (v.map.size === 0) return '{}'
+    if (depth >= TRACE_PREVIEW_DEPTH) return '{…}'
+    const parts: string[] = []
+    let shown = 0
+    for (const [k, val] of v.map) {
+      if (shown === TRACE_PREVIEW_ITEMS) {
+        parts.push('…')
+        break
+      }
+      parts.push(`${traceKey(k)}: ${tracePreview(val, depth + 1)}`)
+      shown += 1
+    }
+    return `{${parts.join(', ')}}`
+  }
+  return formatValue(v)
+}
+
+function traceKey(k: Value): string {
+  if (typeof k === 'string') return `"${truncateTraceString(k)}"`
+  return tracePreview(k, TRACE_PREVIEW_DEPTH)
+}
+
+function truncateTraceString(s: string): string {
+  return s.length > 60 ? `${s.slice(0, 59)}…` : s
 }
 
 /** str() 与 print() 的区别：字符串会带引号 */

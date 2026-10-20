@@ -32,6 +32,7 @@ const tracePrev = document.getElementById('tracePrev') as HTMLButtonElement
 const tracePlay = document.getElementById('tracePlay') as HTMLButtonElement
 const traceNext = document.getElementById('traceNext') as HTMLButtonElement
 const traceLast = document.getElementById('traceLast') as HTMLButtonElement
+const traceCopy = document.getElementById('traceCopy') as HTMLButtonElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
 const shareBtn = document.getElementById('share') as HTMLButtonElement | null
 const copyBtn = document.getElementById('copy') as HTMLButtonElement | null
@@ -334,7 +335,9 @@ let traceIndex = 0
 let traceTimer: number | undefined
 let traceTruncated = false
 
-const TRACE_BUTTONS = [traceFirst, tracePrev, tracePlay, traceNext, traceLast]
+const TRACE_BUTTONS = [traceFirst, tracePrev, tracePlay, traceNext, traceLast, traceCopy]
+const TRACE_EMPTY_HINT = '按「运行」采集轨迹'
+const TRACE_EMPTY_ERROR = '程序没有执行到任何指令（编译未通过）'
 
 function stopTracePlayback(): void {
   if (traceTimer !== undefined) {
@@ -350,6 +353,7 @@ function resetTrace(): void {
   traceSteps = []
   traceIndex = 0
   traceTruncated = false
+  traceEmpty.textContent = TRACE_EMPTY_HINT
 }
 
 function updateTraceVisibility(): void {
@@ -385,8 +389,19 @@ function renderTrace(): void {
   traceIndex = Math.max(0, Math.min(total - 1, traceIndex))
   const step = traceSteps[traceIndex]!
   traceRange.value = String(traceIndex)
-  traceRange.setAttribute('aria-valuetext', `第 ${traceIndex + 1} 步，共 ${total} 步`)
+  traceRange.setAttribute(
+    'aria-valuetext',
+    `第 ${traceIndex + 1} / ${total} 步：${step.fn} ${step.op}，第 ${step.line} 行第 ${step.col} 列`
+  )
   traceCount.textContent = `第 ${traceIndex + 1} / ${total} 步`
+
+  const atStart = traceIndex === 0
+  const atEnd = traceIndex === total - 1
+  traceFirst.disabled = atStart
+  tracePrev.disabled = atStart
+  traceNext.disabled = atEnd
+  traceLast.disabled = atEnd
+  tracePlay.disabled = total < 2
 
   const hidden = step.depth > step.frames.length ? '… › ' : ''
   traceFrames.textContent = `${hidden}${step.frames.join(' › ')}（深度 ${step.depth}）`
@@ -400,6 +415,27 @@ function renderTrace(): void {
     : ''
 }
 
+function traceRowText(step: VMTraceStep, marker: string): string {
+  return `${marker} ${step.fn}  ${String(step.addr).padStart(4, ' ')}  ${step.op.padEnd(18, ' ')} ${step.line}:${step.col}`
+}
+
+/** 当前步的纯文本快照，供「复制本步」使用 */
+function traceStepText(step: VMTraceStep): string {
+  const lines = [
+    `Cha 执行轨迹 第 ${step.step + 1} / ${traceSteps.length} 步`,
+    `函数：${step.fn}（深度 ${step.depth}，地址 ${step.addr}）`,
+    `调用栈：${step.frames.join(' › ')}`,
+    `当前指令：${step.op} · 第 ${step.line} 行，第 ${step.col} 列`,
+    '指令窗口：',
+    ...traceWindowRows().map((row) => row.textContent ?? ''),
+    `栈快照（执行前 · sp=${step.sp}）：`,
+  ]
+  if (step.stack.length === 0) lines.push('（空）')
+  else lines.push(...step.stack.map((item) => `[${item.slot}] ${item.text}`))
+  if (traceTruncated) lines.push(`轨迹只记录了前 ${MAX_TRACE_STEPS} 步，程序本身已完整执行`)
+  return lines.join('\n')
+}
+
 /** 当前步前后各 2 步，全部用 textContent 生成（轨迹内容来自用户程序） */
 function traceWindowRows(): HTMLElement[] {
   const from = Math.max(0, traceIndex - TRACE_WINDOW_BEFORE)
@@ -411,7 +447,7 @@ function traceWindowRows(): HTMLElement[] {
     row.className = i === traceIndex ? 'trace-line current' : 'trace-line'
     if (i === traceIndex) row.setAttribute('aria-current', 'step')
     const marker = i === traceIndex ? '▶' : ' '
-    row.textContent = `${marker} ${step.fn}  ${String(step.addr).padStart(4, ' ')}  ${step.op.padEnd(18, ' ')} ${step.line}:${step.col}`
+    row.textContent = traceRowText(step, marker)
     rows.push(row)
   }
   return rows
@@ -488,6 +524,7 @@ function render(src: string, interactive = false): void {
     traceSteps = steps
     traceIndex = 0
     traceTruncated = steps.length >= MAX_TRACE_STEPS
+    if (steps.length === 0 && result.error) traceEmpty.textContent = TRACE_EMPTY_ERROR
   }
   renderTrace()
   if (inputWasSkipped) {
@@ -656,8 +693,16 @@ copyBtn?.addEventListener('click', () => {
 compareBtn?.addEventListener('click', () => {
   const src = editor.value
   const dialog = makeInputDialog()
+  resetTrace()
+  const steps: VMTraceStep[] = []
+  const collectTrace = showTrace.checked && backendSel.value !== 'tree'
+  const vmOptions: RunOptions = { readLine: dialog.ask, loopBudget: LOOP_BUDGET }
+  if (collectTrace) {
+    vmOptions.trace = (step) => steps.push(step)
+    vmOptions.traceLimit = MAX_TRACE_STEPS
+  }
   const t0 = performance.now()
-  const vmResult = runVM(src, { readLine: dialog.ask, loopBudget: LOOP_BUDGET })
+  const vmResult = runVM(src, vmOptions)
   const t1 = performance.now()
   runTree(src, { readLine: dialog.playback, loopBudget: LOOP_BUDGET })
   const t2 = performance.now()
@@ -666,6 +711,13 @@ compareBtn?.addEventListener('click', () => {
   const speed = vmMs > 0 ? treeMs / vmMs : 1
   timing.textContent = `对比：VM ${vmMs.toFixed(1)}ms · 树遍历 ${treeMs.toFixed(1)}ms · ${speed.toFixed(2)}x`
   paintResult(vmResult, vmMs, src)
+  if (collectTrace) {
+    traceSteps = steps
+    traceIndex = 0
+    traceTruncated = steps.length >= MAX_TRACE_STEPS
+    if (steps.length === 0 && vmResult.error) traceEmpty.textContent = TRACE_EMPTY_ERROR
+  }
+  renderTrace()
   setStatus(
     `双后端对比完成：字节码 VM ${vmMs.toFixed(1)} 毫秒，树遍历 ${treeMs.toFixed(1)} 毫秒，加速比 ${speed.toFixed(2)} 倍`
   )
@@ -685,6 +737,20 @@ tracePrev.addEventListener('click', () => goTrace(traceIndex - 1))
 traceNext.addEventListener('click', () => goTrace(traceIndex + 1))
 traceLast.addEventListener('click', () => goTrace(traceSteps.length - 1))
 tracePlay.addEventListener('click', toggleTracePlayback)
+traceCopy.addEventListener('click', () => {
+  const step = traceSteps[traceIndex]
+  if (!step) return
+  navigator.clipboard.writeText(traceStepText(step)).then(
+    () => {
+      flashButton(traceCopy, '已复制')
+      setStatus(`已复制第 ${traceIndex + 1} 步轨迹到剪贴板`)
+    },
+    () => {
+      flashButton(traceCopy, '复制失败')
+      setStatus('剪贴板不可用，复制轨迹失败')
+    }
+  )
+})
 traceRange.addEventListener('input', () => {
   stopTracePlayback()
   traceIndex = Number(traceRange.value) || 0
