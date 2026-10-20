@@ -94,6 +94,7 @@ print(sum);`,
 
 const DEFAULT_EXAMPLE = '递归 fib（编译器的主场）'
 const STORAGE_KEY = 'cha-playground-state-v1'
+const MAX_OUTPUT_LINES = 2000
 
 interface SavedState {
   code: string
@@ -178,8 +179,15 @@ function paintResult(result: RunResult, ms: number, src: string): void {
   }
 
   output.className = ''
-  const parts: string[] = result.output.map((line) => `<div class="out-line">${escapeHtml(line)}</div>`)
-  lastPlainText = result.output.join('\n')
+  const lines = result.output
+  const shown = lines.length > MAX_OUTPUT_LINES ? lines.slice(0, MAX_OUTPUT_LINES) : lines
+  const parts: string[] = shown.map((line) => `<div class="out-line">${escapeHtml(line)}</div>`)
+  lastPlainText = shown.join('\n')
+  if (lines.length > MAX_OUTPUT_LINES) {
+    const note = `… 输出过长，仅显示前 ${MAX_OUTPUT_LINES} 行（共 ${lines.length} 行）`
+    parts.push(`<div class="meta">${escapeHtml(note)}</div>`)
+    lastPlainText += `\n\n${note}`
+  }
   if (result.error) {
     const errLine = formatError(result.error)
     lastPlainText += `${lastPlainText ? '\n\n' : ''}${errLine}`
