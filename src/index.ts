@@ -78,6 +78,16 @@ function toErrorInfo(e: unknown): ChaErrorInfo {
       phase: 'runtime',
     }
   }
+  if (e instanceof RangeError) {
+    // 解析或求值的嵌套层级把 JS 栈打满（cha 函数调用深度两边都有显式上限，走不到这里）
+    return {
+      name: 'InternalError',
+      message: '嵌套层级过深，超出了引擎的调用栈限制',
+      line: 0,
+      col: 0,
+      phase: 'runtime',
+    }
+  }
   // 理论不可达：内部错误兜底
   const message = e instanceof Error ? e.message : String(e)
   return { name: 'InternalError', message, line: 0, col: 0, phase: 'runtime' }

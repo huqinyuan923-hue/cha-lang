@@ -12,6 +12,20 @@ export class RuntimeError extends Error {
   }
 }
 
+/**
+ * 调用深度上限。树遍历器消耗的是 JS 调用栈，VM 只在自己的帧数组上增长，
+ * 两边都在进函数前检查同一个数，失控递归才能得到同一条中文错误（带调用点行列），
+ * 而不是一个泄漏 RangeError、另一个无声涨内存。
+ *
+ * 500 是量出来的：Playground 里最费栈的形状（每层再套一个闭包调用）在 Chromium
+ * 大约 860 层就把 JS 栈吃满，那时只能靠 RangeError 兜底，报错调用点会比 VM 差一层。
+ * 留出这个余量，桌面和手机浏览器里两个后端都先撞计数器，行列才逐字一致。
+ */
+export const MAX_CALL_DEPTH = 500
+
+/** 两个后端共用的错误文案，保证差分测试逐字一致 */
+export const TOO_DEEP_MESSAGE = `递归太深：调用深度超过 ${MAX_CALL_DEPTH} 层，可能没有出口`
+
 export interface ChaFunction {
   type: 'function'
   name?: string

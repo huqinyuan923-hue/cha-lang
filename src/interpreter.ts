@@ -3,7 +3,9 @@ import { createBuiltins, type ReadLine } from './builtins'
 import {
   ChaMap,
   Environment,
+  MAX_CALL_DEPTH,
   RuntimeError,
+  TOO_DEEP_MESSAGE,
   formatNumber,
   formatValue,
   isTruthy,
@@ -38,6 +40,8 @@ export class Interpreter {
   private output: (text: string) => void
   private clock: () => number
   private readLine: ReadLine | null
+  /** 当前 cha 函数的调用深度，与 VM 的帧数用同一个上限，错误文案才能一致 */
+  private depth = 0
   private resolutions: Resolutions
 
   constructor(resolutions: Resolutions, options: InterpreterOptions = {}) {
@@ -446,14 +450,20 @@ export class Interpreter {
         }
         const prev = this.env
         const local = new Environment(callee.closure)
+        if (this.depth >= MAX_CALL_DEPTH) throw this.err(node, TOO_DEEP_MESSAGE)
+        this.depth++
         try {
           callee.params.forEach((p, i) => local.declare(p, args[i]!, true))
           this.env = local
           this.execStmts(callee.body)
         } catch (e) {
           if (e instanceof ReturnSignal) return e.value
+          // 树遍历器一个 cha 调用要占好几层 JS 栈，可能先于深度上限栈溢出。
+          // 在这里归位成与 VM 同一条错误：最深那层 call() 先接住，node 正好是递归调用点。
+          if (e instanceof RangeError) throw this.err(node, TOO_DEEP_MESSAGE)
           throw e
         } finally {
+          this.depth--
           this.env = prev
         }
         return null

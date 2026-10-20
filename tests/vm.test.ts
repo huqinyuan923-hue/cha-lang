@@ -337,6 +337,49 @@ describe('VM 与树遍历器差分：错误必须逐字对齐', () => {
   })
 })
 
+describe('VM 与树遍历器差分：调用深度失控', () => {
+  /** 树遍历器靠 JS 栈，VM 靠自己的帧数组——失控递归必须两边都收敛到同一条中文错误 */
+  const tooDeep = (src: string) => {
+    const result = diff(src)
+    expect(result.error?.name).toBe('RuntimeError')
+    expect(result.error?.message).toContain('递归太深')
+    expect(result.error?.line).toBeGreaterThan(0)
+    expect(result.output).toEqual([])
+  }
+
+  it('没有出口的自递归', () => {
+    tooDeep('fn f(n) { return f(n - 1) + 1; } print(f(5000));')
+  })
+
+  it('有出口但超过上限', () => {
+    tooDeep('fn f(n) { if (n <= 0) return 0; return 1 + f(n - 1); } print(f(5000));')
+  })
+
+  it('互递归报错在同一个调用点', () => {
+    tooDeep('fn a(n) { return b(n - 1) + 1; } fn b(n) { return a(n - 1) + 1; } print(a(9000));')
+  })
+
+  it('函数值转手调用（trampoline 式）', () => {
+    tooDeep('fn apply(g) { return g(); } fn loop() { return apply(loop); } print(loop());')
+  })
+
+  it('闭包内递归，且深度检查晚于参数个数检查', () => {
+    tooDeep('fn make(n) { fn inner(m) { return inner(m - 1) + n; } return inner(9000); } print(make(1));')
+    diff('fn f(a, b) { return f(a, b); } print(f(1));')
+  })
+
+  it('上限之内照常算，边界两侧各验一次', () => {
+    const ok = diff('fn f(n) { if (n <= 0) return 0; return 1 + f(n - 1); } print(f(499));')
+    expect(ok.output).toEqual(['499'])
+    // f(N) 要 N+1 层：第 500 层还能进去，第 501 层才报错
+    tooDeep('fn f(n) { if (n <= 0) return 0; return 1 + f(n - 1); } print(f(500));')
+  })
+
+  it('深度错误优先于同一层的类型错误', () => {
+    tooDeep('fn f(n) { return f(n - 1) + "x"; } print(f(9000));')
+  })
+})
+
 describe('VM 专属：字节码与反汇编', () => {
   it('反汇编输出包含指令与位置', () => {
     const proto = compile(parse('var x = 1; print(x + 2);'))

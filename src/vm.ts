@@ -11,7 +11,9 @@ import { Chunk, Op, TemplateInfo, type Upvalue, type VMFunction } from './chunk'
 import {
   ChaFunction,
   ChaMap,
+  MAX_CALL_DEPTH,
   RuntimeError,
+  TOO_DEEP_MESSAGE,
   formatNumber,
   formatValue,
   isTruthy,
@@ -387,6 +389,8 @@ export class VirtualMachine {
               }
               // 返回地址写回父帧，子帧从 0 开始执行
               frame.ip = ip
+              // 顶层脚本帧不算一次 cha 调用，减掉才能和树遍历器的 depth 同点触发
+              if (this.frames.length - 1 >= MAX_CALL_DEPTH) throw err(start, TOO_DEEP_MESSAGE)
               this.frames.push({ closure: fn, ip: 0, base: this.sp - argc })
               frame = this.frames[this.frames.length - 1]!
               code = frame.closure.chunk.code
