@@ -6,6 +6,11 @@
 
 **在线体验**：<https://cha.adcakeyuan.top> —— 浏览器内编辑运行、双后端一键切换、可查看编译出的字节码。
 
+<p align="center">
+  <img src="docs/playground.png" width="49%" alt="Cha Playground：左侧编辑源码，右侧实时输出" />
+  <img src="docs/playground-disasm.png" width="49%" alt="字节码视图：操作码、常量与跳转目标分色渲染" />
+</p>
+
 ```cha
 // 一杯茶的时间，看懂这门语言
 var 杯子 = ["龙井", "普洱", "铁观音"];
