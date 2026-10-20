@@ -19,6 +19,7 @@
   ],
   "type": "module",
   "private": true,
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   },

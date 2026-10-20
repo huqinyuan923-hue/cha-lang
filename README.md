@@ -154,3 +154,7 @@ pnpm test:watch  # 开发模式
 ## 系列文章
 
 实现过程中的设计决策、踩坑与取舍，写成了一系列文章（大纲见 [docs/SERIES.md](docs/SERIES.md)）。
+
+## 许可证
+
+[MIT](LICENSE) © 2026 huqinyuan923-hue
