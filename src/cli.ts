@@ -15,12 +15,40 @@ import { resolve } from './resolver'
 import { startRepl } from './repl'
 import { createStdinReader } from './stdin'
 
+const KNOWN_FLAGS = ['--tree', '--disasm']
+
+const USAGE = `用法：
+  cha run <文件.cha>            运行脚本（默认字节码 VM）
+  cha run <文件.cha> --tree     用树遍历解释器跑
+  cha run <文件.cha> --disasm   只打印字节码，不执行
+  cha [repl]                    进入交互式环境`
+
 export function main(argv: string[] = process.argv.slice(2)): void {
   const [command, ...rest] = argv
 
+  if (command === '--help' || command === '-h' || command === 'help') {
+    console.log(USAGE)
+    return
+  }
+
   if (command === 'run') {
     const flags = rest.filter((a) => a.startsWith('--'))
-    const file = rest.find((a) => !a.startsWith('--'))
+    const files = rest.filter((a) => !a.startsWith('--'))
+    const unknown = flags.filter((f) => !KNOWN_FLAGS.includes(f))
+    if (unknown.length > 0) {
+      // 拼错的 --tre 会被当成「没有 flag」，静默换后端比报错危险得多
+      console.error(`未知选项 '${unknown.join(' ')}'。\n${USAGE}`)
+      process.exit(64)
+    }
+    if (flags.includes('--tree') && flags.includes('--disasm')) {
+      console.error('--tree 与 --disasm 不能同时使用（--disasm 只编译，不选后端）。')
+      process.exit(64)
+    }
+    if (files.length > 1) {
+      console.error(`只接受一个脚本文件，收到 ${files.length} 个：${files.join(' ')}`)
+      process.exit(64)
+    }
+    const file = files[0]
     if (!file) {
       console.error('用法：cha run <文件.cha> [--tree | --disasm]')
       process.exit(64)
@@ -64,7 +92,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     return
   }
 
-  console.error(`未知命令 '${command}'。用法：cha [run <文件.cha> [--tree|--disasm] | repl]`)
+  console.error(`未知命令 '${command}'。\n${USAGE}`)
   process.exit(64)
 }
 

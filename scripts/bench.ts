@@ -1,10 +1,12 @@
 /**
  * 双后端性能基准：树遍历解释器 vs 字节码 VM。
- * 用法：npx tsx scripts/bench.ts [迭代倍率]
+ * 用法：npx tsx scripts/bench.ts（倍率改下面的 scale，不接命令行参数，避免把外部输入喂进解释器）
  * 每个用例预热一次后计时取中位数，输出相对加速比。
+ *
+ * 计时是端到端的：run()/runVM() 里含词法、解析、作用域解析、（VM 还有）编译，
+ * 所以这张表读作「跑一个脚本的总耗时」，不是「纯指令执行的差距」。
  */
-import { run } from '../src/index'
-import { runVM } from '../src/index'
+import { run, runVM } from '../src/index'
 
 /** 负载倍率：改这里（不做命令行参数，避免把外部输入喂进解释器） */
 const scale = 1
