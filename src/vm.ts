@@ -47,6 +47,8 @@ export class VirtualMachine {
   private sp = 0
   private frames: Frame[] = []
   private openUpvalues: Upvalue[] = []
+  /** 原生调用复用同一个参数数组：内建函数全部同步读取、不回调 VM，可安全共享 */
+  private nativeArgs: Value[] = []
   readonly globals = new Map<string, Value>()
   private output: (text: string) => void
   private clock: () => number
@@ -191,14 +193,7 @@ export class VirtualMachine {
         case Op.CLOSE_UPVALUES: {
           const minSlot = frame.base + (code[ip]! | (code[ip + 1]! << 8))
           ip += 2
-          this.openUpvalues = this.openUpvalues.filter((up) => {
-            if (up.slot !== null && up.slot >= minSlot) {
-              up.closed = stack[up.slot]
-              up.slot = null
-              return false
-            }
-            return true
-          })
+          this.closeUpvaluesFrom(minSlot)
           break
         }
 
@@ -229,11 +224,11 @@ export class VirtualMachine {
         case Op.MAP: {
           const pairs = code[ip]! | (code[ip + 1]! << 8)
           ip += 2
-          const flat = stack.slice(this.sp - pairs * 2, this.sp)
-          this.sp -= pairs * 2 - 1
+          const first = this.sp - pairs * 2
           const map = new ChaMap()
-          for (let i = 0; i < flat.length; i += 2) map.map.set(flat[i]!, flat[i + 1]!)
-          stack[this.sp - 1] = map
+          for (let i = 0; i < pairs; i++) map.map.set(stack[first + i * 2]!, stack[first + i * 2 + 1]!)
+          this.sp = first + 1
+          stack[first] = map
           break
         }
 
@@ -362,7 +357,9 @@ export class VirtualMachine {
               if (native.arity !== 'variadic' && argc !== native.arity) {
                 throw err(start, `${native.name}() 需要 ${native.arity} 个参数，收到 ${argc} 个`)
               }
-              const args = stack.slice(this.sp - argc, this.sp)
+              const args = this.nativeArgs
+              args.length = argc
+              for (let i = 0; i < argc; i++) args[i] = stack[this.sp - argc + i]!
               let result: Value
               try {
                 result = native.fn(args)
@@ -404,14 +401,7 @@ export class VirtualMachine {
         case Op.RETURN: {
           const result = stack[this.sp - 1]!
           const base = frame.base
-          this.openUpvalues = this.openUpvalues.filter((up) => {
-            if (up.slot !== null && up.slot >= base) {
-              up.closed = stack[up.slot]
-              up.slot = null
-              return false
-            }
-            return true
-          })
+          this.closeUpvaluesFrom(base)
           this.frames.pop()
           if (this.frames.length === 0) {
             this.sp = 0
@@ -516,15 +506,35 @@ export class VirtualMachine {
     return frame.closure.chunk.cols[at]!
   }
 
+  /** 下标操作用的错误构造：热路径上不再每次分配闭包 */
+  private errAt(at: number, message: string): RuntimeError {
+    return new RuntimeError(message, this.currentLine(at), this.currentCol(at))
+  }
+
+  /** 关闭 slot >= minSlot 的开放 upvalue（原地压缩，避免每次作用域退出都新建数组） */
+  private closeUpvaluesFrom(minSlot: number): void {
+    const stack = this.stack
+    const list = this.openUpvalues
+    let keep = 0
+    for (let i = 0; i < list.length; i++) {
+      const up = list[i]!
+      if (up.slot !== null && up.slot >= minSlot) {
+        up.closed = stack[up.slot]
+        up.slot = null
+      } else {
+        list[keep++] = up
+      }
+    }
+    list.length = keep
+  }
+
   private readIndex(at: number, target: Value, index: Value): Value {
-    const fail = (message: string): RuntimeError =>
-      new RuntimeError(message, this.currentLine(at), this.currentCol(at))
     if (Array.isArray(target)) {
       if (typeof index !== 'number' || !Number.isInteger(index)) {
-        throw fail(`数组下标必须是整数，得到 ${formatValue(index)}`)
+        throw this.errAt(at, `数组下标必须是整数，得到 ${formatValue(index)}`)
       }
       if (index < 0 || index >= target.length) {
-        throw fail(`数组下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
+        throw this.errAt(at, `数组下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
       }
       return target[index]!
     }
@@ -533,25 +543,23 @@ export class VirtualMachine {
     }
     if (typeof target === 'string') {
       if (typeof index !== 'number' || !Number.isInteger(index)) {
-        throw fail(`字符串下标必须是整数，得到 ${formatValue(index)}`)
+        throw this.errAt(at, `字符串下标必须是整数，得到 ${formatValue(index)}`)
       }
       if (index < 0 || index >= target.length) {
-        throw fail(`字符串下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
+        throw this.errAt(at, `字符串下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
       }
       return target[index]!
     }
-    throw fail(`${typeName(target)} 不支持下标访问`)
+    throw this.errAt(at, `${typeName(target)} 不支持下标访问`)
   }
 
   private writeIndex(at: number, target: Value, index: Value, value: Value): void {
-    const fail = (message: string): RuntimeError =>
-      new RuntimeError(message, this.currentLine(at), this.currentCol(at))
     if (Array.isArray(target)) {
       if (typeof index !== 'number' || !Number.isInteger(index)) {
-        throw fail(`数组下标必须是整数，得到 ${formatValue(index)}`)
+        throw this.errAt(at, `数组下标必须是整数，得到 ${formatValue(index)}`)
       }
       if (index < 0 || index >= target.length) {
-        throw fail(`数组下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
+        throw this.errAt(at, `数组下标越界：长度 ${target.length}，下标 ${formatNumber(index)}`)
       }
       target[index] = value
       return
@@ -560,6 +568,6 @@ export class VirtualMachine {
       target.map.set(index, value)
       return
     }
-    throw fail(`${typeName(target)} 不支持按下标赋值`)
+    throw this.errAt(at, `${typeName(target)} 不支持按下标赋值`)
   }
 }
