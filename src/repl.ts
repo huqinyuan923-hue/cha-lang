@@ -1,6 +1,7 @@
 import { createInterface } from 'readline'
 import { pathToFileURL } from 'url'
 import { Session } from './index'
+import { createStdinReader } from './stdin'
 
 /**
  * 独立 REPL（`pnpm repl`）。
@@ -18,7 +19,23 @@ export async function startRepl(): Promise<void> {
   // 会话：变量与函数跨行共享
   const session = new Session({
     output: (text) => console.log(text),
+    readLine: createStdinReader(),
   })
+
+  /**
+   * 跑一段代码前先 pause readline：input() 是直接 readSync(fd 0) 的，
+   * readline 处于流动模式会把用户敲的那一行吃掉。
+   * 注意管道输入（`echo … | cha repl`）下 readline 已把整段读完，input() 会立刻拿到 EOF 返回 null，
+   * 需要标准输入的程序请写成脚本用 `cha run`。
+   */
+  function runSource(source: string): ReturnType<Session['run']> {
+    rl.pause()
+    try {
+      return session.run(source)
+    } finally {
+      rl.resume()
+    }
+  }
 
   let pending = ''
 
@@ -41,11 +58,11 @@ export async function startRepl(): Promise<void> {
     }
 
     const source = pending === '' ? asSource(input) : `${input}\n`
-    let result = session.run(source)
+    let result = runSource(source)
 
     // 表达式解析失败 → 按语句重试（例如以 { 开头的代码块）
     if (pending === '' && looksLikeExpression(input) && result.error?.phase === 'parse') {
-      result = session.run(`${input};\n`)
+      result = runSource(`${input};\n`)
     }
 
     // 解析错误且输入明显没写完 → 进入/维持多行模式

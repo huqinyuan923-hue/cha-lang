@@ -20,7 +20,7 @@ import {
   type NativeFunction,
   type Value,
 } from './values'
-import { createBuiltins } from './builtins'
+import { createBuiltins, type ReadLine } from './builtins'
 
 /** 字节码后端的运行时函数值：树遍历器的函数值形状 + chunk/upvalues */
 export type VMClosure = ChaFunction & { chunk: Chunk; upvalues: Upvalue[] }
@@ -40,6 +40,8 @@ export interface VMOptions {
   maxSteps?: number
   /** 每条指令执行前的轨迹回调（调试/教学用） */
   trace?: (info: { addr: number; op: string; sp: number; base: number }) => void
+  /** input() 的数据来源；不提供则 input() 报「宿主没有提供标准输入」 */
+  readLine?: ReadLine | null
 }
 
 export class VirtualMachine {
@@ -61,7 +63,7 @@ export class VirtualMachine {
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.maxSteps = options.maxSteps ?? Number.POSITIVE_INFINITY
     this.trace = options.trace
-    for (const native of createBuiltins(this.output, this.clock)) {
+    for (const native of createBuiltins(this.output, this.clock, options.readLine ?? null)) {
       this.globals.set(native.name, native)
     }
   }

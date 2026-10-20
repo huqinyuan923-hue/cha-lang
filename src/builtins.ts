@@ -5,9 +5,13 @@
 import { RuntimeError } from './values'
 import { ChaMap, formatValue, inspectValue, typeName, type NativeFunction, type Value } from './values'
 
+/** 宿主提供的行读取：返回不含换行的一行，输入结束（EOF）返回 null */
+export type ReadLine = (prompt: string | null) => string | null
+
 export function createBuiltins(
   output: (text: string) => void,
-  clock: () => number
+  clock: () => number,
+  readLine: ReadLine | null = null
 ): NativeFunction[] {
   const native = (
     name: string,
@@ -97,8 +101,12 @@ export function createBuiltins(
       else for (let i = start; i > stop; i += step) out.push(i)
       return out
     }),
-    native('input', 0, () => {
-      throw new RuntimeError('input() 暂未实现（REPL 交互输入在路线图里）')
+    native('input', 'variadic', (args) => {
+      if (args.length > 1) {
+        throw new RuntimeError(`input() 只能接受 0 或 1 个参数（提示语），收到 ${args.length} 个`)
+      }
+      if (!readLine) throw new RuntimeError('input() 在当前环境不可用：宿主没有提供标准输入')
+      return readLine(args.length === 1 ? formatValue(args[0]!) : null)
     }),
   ]
 }

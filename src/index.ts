@@ -5,6 +5,7 @@ import { ResolveError, resolve } from './resolver'
 import { compile, FunctionCompiler } from './compiler'
 import { disassemble, type VMFunction } from './chunk'
 import { VirtualMachine } from './vm'
+import type { ReadLine } from './builtins'
 
 export { RuntimeError }
 export { compile, FunctionCompiler }
@@ -30,6 +31,8 @@ export interface RunOptions {
   /** print 的去处；默认收集到 result.output */
   output?: (text: string) => void
   clock?: () => number
+  /** input() 的数据来源；浏览器 Playground 接 prompt()，CLI 接标准输入 */
+  readLine?: ReadLine
 }
 
 /**
@@ -44,7 +47,11 @@ export function run(source: string, options: RunOptions = {}): RunResult {
   try {
     const program = parse(source)
     const resolutions = resolve(program)
-    const interpreter = new Interpreter(resolutions, { output: sink, clock: options.clock })
+    const interpreter = new Interpreter(resolutions, {
+      output: sink,
+      clock: options.clock,
+      readLine: options.readLine,
+    })
     interpreter.run(program)
     return { output }
   } catch (e) {
@@ -115,7 +122,11 @@ export function runVM(source: string, options: RunOptions = {}): RunResult {
     const program = parse(source)
     resolve(program) // 编译期错误（重复声明、自引用等）与 run() 同相位
     const proto = compile(program)
-    const vm = new VirtualMachine({ output: sink, clock: options.clock })
+    const vm = new VirtualMachine({
+      output: sink,
+      clock: options.clock,
+      readLine: options.readLine,
+    })
     vm.execute(proto)
     return { output }
   } catch (e) {

@@ -23,6 +23,33 @@ const compareBtn = document.getElementById('compare') as HTMLButtonElement | nul
 
 let lastPlainText = ''
 
+/** 浏览器没有同步 stdin：只在用户明确「运行」时用模态框收一行输入 */
+const dialogReader = (prompt: string | null): string | null =>
+  window.prompt(prompt ?? '输入一行：', '')
+
+/**
+ * 打字自动重跑、切示例、切后端时不弹窗——否则每敲一个字符都会被问一次。
+ * 这些路径上 input() 直接得到 nil，并在状态栏提示用户按「运行」。
+ */
+let inputWasSkipped = false
+const silentReader = (): string | null => {
+  inputWasSkipped = true
+  return null
+}
+
+/** 双后端对比只弹一次：第一个后端真正提问，第二个按同样顺序回放答案 */
+const makeInputDialog = () => {
+  const answers: (string | null)[] = []
+  return {
+    ask: (prompt: string | null): string | null => {
+      const answer = dialogReader(prompt)
+      answers.push(answer)
+      return answer
+    },
+    playback: (): string | null => (answers.length === 0 ? null : (answers.shift() as string | null)),
+  }
+}
+
 const EXAMPLES: Record<string, string> = {
   '递归 fib（编译器的主场）': `// 经典递归：字节码 VM 省掉了每次重新走 AST 的开销
 fn fib(n) {
@@ -90,6 +117,14 @@ if (数量 > 2) {
     print("少了右括号";
 }
 print("这行永远不会执行");`,
+  '标准输入 input()': `// input() 读一行，参数是提示语；没有输入时得到 nil。
+// 打字时的自动运行不弹窗（返回 nil），点「运行」才会弹出输入框。
+var 名字 = input("你叫什么名字？");
+if (名字 == nil) {
+    print("(自动运行不采集输入，点「运行」试试)");
+} else {
+    print("你好，\${名字}！");
+}`,
   '性能对比：循环累加': `// 试试切换两个后端感受差距（树遍历 vs 字节码）
 var sum = 0;
 for (var i = 0; i < 200000; i += 1) {
@@ -206,14 +241,19 @@ function paintResult(result: RunResult, ms: number, src: string): void {
   output.scrollTop = 0
 }
 
-function render(src: string): void {
+function render(src: string, interactive = false): void {
   const t0 = performance.now()
   const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
-  const result = backend === 'vm' ? runVM(src) : runTree(src)
+  inputWasSkipped = false
+  const readLine = interactive ? dialogReader : silentReader
+  const result = backend === 'vm' ? runVM(src, { readLine }) : runTree(src, { readLine })
   const ms = performance.now() - t0
   const backendName = backend === 'vm' ? '字节码 VM' : '树遍历'
   timing.textContent = `${backendName} · ${ms.toFixed(1)}ms`
   paintResult(result, ms, src)
+  if (inputWasSkipped) {
+    setStatus(`${status?.textContent ?? ''} · 代码里的 input() 返回 nil，按「运行」才会弹窗要输入`)
+  }
 }
 
 function escapeHtml(s: string): string {
@@ -339,7 +379,7 @@ backendSel.addEventListener('change', () => {
   saveState()
 })
 runBtn.addEventListener('click', () => {
-  render(editor.value)
+  render(editor.value, true)
   saveState()
 })
 shareBtn?.addEventListener('click', () => {
@@ -370,10 +410,11 @@ copyBtn?.addEventListener('click', () => {
 })
 compareBtn?.addEventListener('click', () => {
   const src = editor.value
+  const dialog = makeInputDialog()
   const t0 = performance.now()
-  const vmResult = runVM(src)
+  const vmResult = runVM(src, { readLine: dialog.ask })
   const t1 = performance.now()
-  runTree(src)
+  runTree(src, { readLine: dialog.playback })
   const t2 = performance.now()
   const vmMs = t1 - t0
   const treeMs = t2 - t1
@@ -427,7 +468,7 @@ editor.addEventListener('keydown', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault()
-    render(editor.value)
+    render(editor.value, true)
     saveState()
   }
 })

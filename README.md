@@ -92,7 +92,11 @@ print(茶单["龙井"], len(茶单), has(茶单, "普洱"));  // 30 3 true
 
 ### 内建函数
 
-`print(...)` `clock()` `len(x)` `type(x)` `str(x)` `num(s)` `floor(n)` `abs(n)` `push(arr, v)` `pop(arr)` `keys(m)` `values(m)` `has(m, k)` `range(a[, b[, step]])`
+`print(...)` `clock()` `len(x)` `type(x)` `str(x)` `num(s)` `floor(n)` `abs(n)` `push(arr, v)` `pop(arr)` `keys(m)` `values(m)` `has(m, k)` `range(a[, b[, step]])` `input([提示语])`
+
+`input()` 读一行（不含换行），参数是会原样写到标准输出的提示语；输入结束（EOF）返回 `nil`。
+CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框——只在点「运行」时弹，
+打字时的自动重跑不会打断你（那时 `input()` 直接返回 `nil`）。
 
 ## 项目结构（一条流水线，两个后端）
 
@@ -112,7 +116,7 @@ print(茶单["龙井"], len(茶单), has(茶单, "普洱"));  // 30 3 true
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
 ```
 
-两个后端由 **122 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
+两个后端由 **129 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -136,10 +140,16 @@ pnpm cha run examples/fib.cha            # 默认字节码 VM 跑
 pnpm cha run examples/fib.cha --tree     # 树遍历解释器跑
 ```
 
+标准输入也是通的：
+
+```bash
+printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 stdin
+```
+
 ## 测试
 
 ```bash
-pnpm test        # 全量 122 个用例（含差分与模糊测试）
+pnpm test        # 全量 129 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
@@ -147,6 +157,7 @@ pnpm test:watch  # 开发模式
 
 - [x] 字节码编译器 + 栈式虚拟机（差分验证：错误信息逐字一致，基准 1.4~3x）
 - [x] 浏览器 Playground（[在线版](https://cha.adcakeyuan.top)，双后端切换 + 字节码视图，`playground/index.html`）
+- [x] `input()` 标准输入（CLI/REPL 同步读 stdin，Playground 用输入对话框）
 - [ ] 字符串插值的解析器协同（消掉词法器的歧义报错）
 - [ ] 类与继承（成员方法、this）
 - [ ] try/catch 错误处理

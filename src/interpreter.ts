@@ -1,5 +1,5 @@
 import type { Expr, Program, Stmt } from './ast'
-import { createBuiltins } from './builtins'
+import { createBuiltins, type ReadLine } from './builtins'
 import {
   ChaMap,
   Environment,
@@ -26,6 +26,8 @@ export interface InterpreterOptions {
   /** print 的去处（默认丢弃）；REPL/CLI 接 stdout，测试接数组 */
   output?: (text: string) => void
   clock?: () => number
+  /** input() 的数据来源；不提供则 input() 报「宿主没有提供标准输入」 */
+  readLine?: ReadLine | null
 }
 
 type Resolutions = Map<Expr, number>
@@ -35,12 +37,14 @@ export class Interpreter {
   private env = this.globals
   private output: (text: string) => void
   private clock: () => number
+  private readLine: ReadLine | null
   private resolutions: Resolutions
 
   constructor(resolutions: Resolutions, options: InterpreterOptions = {}) {
     this.resolutions = resolutions
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
+    this.readLine = options.readLine ?? null
     this.installBuiltins()
   }
 
@@ -462,7 +466,7 @@ export class Interpreter {
 
   private installBuiltins(): void {
     // 内建实现抽到 builtins.ts，与字节码 VM 共用同一份
-    for (const builtin of createBuiltins(this.output, this.clock)) {
+    for (const builtin of createBuiltins(this.output, this.clock, this.readLine)) {
       this.globals.declare(builtin.name, builtin)
     }
   }

@@ -287,6 +287,32 @@ describe('内建函数', () => {
     const r = execute('print(type(clock()));')
     expect(r.output).toEqual(['number'])
   })
+
+  it('input() 走宿主提供的行读取，提示语原样传出', () => {
+    const queue = ['张三', '42']
+    const prompts: (string | null)[] = []
+    const r = run('var a = input("名字："); var b = input(); print("${a}|${b}");', {
+      readLine: (prompt) => {
+        prompts.push(prompt)
+        return queue.length > 0 ? (queue.shift() as string) : null
+      },
+    })
+    expect(r.error).toBeUndefined()
+    expect(r.output).toEqual(['张三|42'])
+    expect(prompts).toEqual(['名字：', null])
+  })
+
+  it('input()：EOF 得到 nil，参数过多与宿主缺失都报错在调用点', () => {
+    expect(run('print(input() == nil);', { readLine: () => null }).output).toEqual(['true'])
+
+    const tooMany = run('print(input("a", "b"));', { readLine: () => null })
+    expect(tooMany.error).toMatchObject({ phase: 'runtime', line: 1 })
+    expect(tooMany.error!.message).toContain('input() 只能接受 0 或 1 个参数')
+
+    const noHost = run('print(input());')
+    expect(noHost.error).toMatchObject({ phase: 'runtime', line: 1 })
+    expect(noHost.error!.message).toContain('宿主没有提供标准输入')
+  })
 })
 
 describe('错误定位与结构化返回', () => {

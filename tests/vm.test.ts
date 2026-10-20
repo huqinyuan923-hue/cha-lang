@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { run, runVM } from '../src/index'
+import { run, runVM, type RunOptions } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
@@ -8,9 +8,9 @@ import { parse } from '../src/parser'
  * 差分断言：字节码 VM 的输出与错误必须和树遍历解释器完全一致。
  * 树遍历器是参照实现——它的行为就是语言规范。
  */
-const diff = (src: string) => {
-  const tree = run(src)
-  const vm = runVM(src)
+const diff = (src: string, options: RunOptions = {}) => {
+  const tree = run(src, options)
+  const vm = runVM(src, options)
   expect({ out: vm.output, err: vm.error }).toEqual({ out: tree.output, err: tree.error })
   return vm
 }
@@ -195,6 +195,52 @@ describe('VM 与树遍历器差分：数组 / map / 内建函数', () => {
   })
 })
 
+describe('VM 与树遍历器差分：标准输入 input()', () => {
+  /** 每次运行各拿一份独立队列，两个后端读到同样的行 */
+  const feed = (...lines: string[]): RunOptions => {
+    let i = 0
+    return { readLine: () => (i < lines.length ? lines[i++]! : null) }
+  }
+  const diffFed = (src: string, lines: string[] = []) => {
+    const tree = run(src, feed(...lines))
+    const vm = runVM(src, feed(...lines))
+    expect({ out: vm.output, err: vm.error }).toEqual({ out: tree.output, err: tree.error })
+    return vm
+  }
+
+  it('读取整行并可用于插值', () => {
+    expect(diffFed('var a = input("名字："); print("你好 ${a}");', ['张三']).output).toEqual(['你好 张三'])
+  })
+
+  it('EOF 返回 nil', () => {
+    expect(diffFed('var a = input(); print(a == nil, type(a));', []).output).toEqual(['true nil'])
+  })
+
+  it('循环逐行读取直到 EOF', () => {
+    const src = `
+      var total = 0;
+      while (true) {
+          var line = input();
+          if (line == nil) { break; }
+          total += num(line);
+      }
+      print(total);
+    `
+    expect(diffFed(src, ['1', '2', '3']).output).toEqual(['6'])
+  })
+
+  it('参数超过 1 个时报错在调用点', () => {
+    const r = diffFed('print(input("a", "b"));', ['x'])
+    expect(r.error).toMatchObject({ phase: 'runtime', line: 1 })
+    expect(r.error!.message).toContain('input() 只能接受 0 或 1 个参数')
+  })
+
+  it('宿主没给标准输入时两个后端同样报错', () => {
+    const r = diff('print(input());')
+    expect(r.error!.message).toContain('宿主没有提供标准输入')
+  })
+})
+
 describe('VM 与树遍历器差分：错误必须逐字对齐', () => {
   it('算术与类型错误', () => {
     diff('print(1 / 0);')
@@ -243,7 +289,8 @@ describe('VM 专属：字节码与反汇编', () => {
     const { join } = require('node:path') as typeof import('node:path')
     const dir = join(__dirname, '..', 'examples')
     for (const file of readdirSync(dir).filter((f: string) => f.endsWith('.cha'))) {
-      diff(readFileSync(join(dir, file), 'utf-8'))
+      // 示例里的 input() 统一喂一行固定文本
+      diff(readFileSync(join(dir, file), 'utf-8'), { readLine: () => '示例输入' })
     }
   })
 })

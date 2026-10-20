@@ -1,0 +1,21 @@
+// 标准输入：input() 读一行，参数是提示语；输入结束（EOF）返回 nil
+var 名字 = input("你叫什么名字？");
+if (名字 == nil) {
+    print("(没有收到输入)");
+} else {
+    print("你好，${名字}！");
+}
+
+// 不带提示语的写法：先用 print 排好版，再读
+print("报个数：");
+var 文本 = input();
+if (文本 == nil) {
+    print("(没有收到输入)");
+} else {
+    var n = num(文本);
+    if (n == nil) {
+        print("${文本} 不算数字");
+    } else {
+        print("${n} 的平方是 ${n * n}");
+    }
+}

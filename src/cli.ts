@@ -13,6 +13,7 @@ import { compile } from './compiler'
 import { parse } from './parser'
 import { resolve } from './resolver'
 import { startRepl } from './repl'
+import { createStdinReader } from './stdin'
 
 export function main(argv: string[] = process.argv.slice(2)): void {
   const [command, ...rest] = argv
@@ -45,8 +46,11 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     }
 
     const backend = flags.includes('--tree') ? run : runVM
-    const result = backend(source)
-    for (const line of result.output) console.log(line)
+    // 流式输出：input() 的提示语必须出现在它之前的 print 之后，不能等程序跑完再一起打
+    const result = backend(source, {
+      output: (text) => process.stdout.write(`${text}\n`),
+      readLine: createStdinReader(),
+    })
     if (result.error) {
       const e = result.error
       console.error(`\n${phaseName(e.phase)}错误（第 ${e.line} 行，第 ${e.col} 列）：${e.message}`)
