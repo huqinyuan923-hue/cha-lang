@@ -83,6 +83,7 @@
       <option value="vm">后端：字节码 VM</option>
       <option value="tree">后端：树遍历解释器</option>
     </select>
+    <button id="share" type="button" title="复制包含当前代码与后端的分享链接">分享</button>
     <button id="run" class="primary" type="button" title="运行（Ctrl/Cmd + Enter）" aria-keyshortcuts="Control+Enter Meta+Enter">▶ 运行</button>
   </div>
 </header>
@@ -90,7 +91,7 @@
   <section aria-labelledby="source-title">
     <h2 class="pane-title" id="source-title"><span>源码</span><span id="timing" class="meta"></span></h2>
     <label class="sr-only" for="editor">Cha 源码编辑器</label>
-    <textarea id="editor" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off"></textarea>
+    <textarea id="editor" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off" title="Tab 缩进 · Shift+Tab 反缩进 · Ctrl/Cmd+/ 注释 · Ctrl/Cmd+Enter 运行"></textarea>
   </section>
   <section aria-labelledby="output-title">
     <h2 class="pane-title" id="output-title">

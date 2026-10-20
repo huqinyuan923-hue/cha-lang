@@ -17,6 +17,7 @@ const backendSel = document.getElementById('backend') as HTMLSelectElement
 const exampleSel = document.getElementById('example') as HTMLSelectElement
 const showDisasm = document.getElementById('showDisasm') as HTMLInputElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
+const shareBtn = document.getElementById('share') as HTMLButtonElement | null
 
 const EXAMPLES: Record<string, string> = {
   '递归 fib（编译器的主场）': `// 经典递归：字节码 VM 省掉了每次重新走 AST 的开销
@@ -63,6 +64,10 @@ for (var i = 0; i < len(盘子); i += 1) {
     if (has(价格表, 水果)) { 总价 += 价格表[水果]; }
 }
 print("总价：\${总价} 元");`,
+  '运行时错误演示': `// 出错也不怕：输出区会给出准确的错误名、行号与列号
+print("这行会先执行");
+var 结果 = 未知变量 + 1;
+print("这行不会执行");`,
   '性能对比：循环累加': `// 试试切换两个后端感受差距（树遍历 vs 字节码）
 var sum = 0;
 for (var i = 0; i < 200000; i += 1) {
@@ -120,6 +125,18 @@ function loadState(): SavedState | null {
   }
 }
 
+function shareHash(): string {
+  return new URLSearchParams({ code: editor.value, b: backendSel.value === 'tree' ? 'tree' : 'vm' }).toString()
+}
+
+function loadShared(): { code: string; backend: 'vm' | 'tree' } | null {
+  if (location.hash.length <= 1) return null
+  const params = new URLSearchParams(location.hash.slice(1))
+  const code = params.get('code')
+  if (code === null || code.trim() === '') return null
+  return { code, backend: params.get('b') === 'tree' ? 'tree' : 'vm' }
+}
+
 function render(src: string): void {
   const t0 = performance.now()
   const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
@@ -166,6 +183,60 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+function setEditorValue(next: string, selStart: number, selEnd: number = selStart): void {
+  editor.value = next
+  editor.selectionStart = selStart
+  editor.selectionEnd = selEnd
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function lineBlock(): { start: number; end: number; lines: string[] } {
+  const value = editor.value
+  const start = value.lastIndexOf('\n', Math.max(0, editor.selectionStart - 1)) + 1
+  let end = value.indexOf('\n', editor.selectionEnd)
+  if (end === -1) end = value.length
+  return { start, end, lines: value.slice(start, end).split('\n') }
+}
+
+/** 对整行区间做等量变换，并把选区坐标映射回新文本。 */
+function replaceBlock(start: number, end: number, lines: string[], out: string[]): void {
+  const value = editor.value
+  const selStart = editor.selectionStart
+  const selEnd = editor.selectionEnd
+  const map = (p: number): number => {
+    let shift = 0
+    let pos = start
+    for (let i = 0; i < lines.length; i += 1) {
+      const lineStartPos = pos
+      const lineEndPos = pos + lines[i]!.length
+      const d = out[i]!.length - lines[i]!.length
+      if (p >= lineEndPos) shift += d
+      else if (p > lineStartPos) shift += d > 0 ? d : Math.max(d, -(p - lineStartPos))
+      pos = lineEndPos + 1
+    }
+    return p + shift
+  }
+  const next = value.slice(0, start) + out.join('\n') + value.slice(end)
+  setEditorValue(next, map(selStart), map(selEnd))
+}
+
+function reindent(dedent: boolean): void {
+  const { start, end, lines } = lineBlock()
+  const out = lines.map((line) => (dedent ? line.replace(/^ {1,4}/, '') : `    ${line}`))
+  replaceBlock(start, end, lines, out)
+}
+
+function toggleComment(): void {
+  const { start, end, lines } = lineBlock()
+  const meaningful = lines.filter((line) => line.trim() !== '')
+  const allCommented = meaningful.length > 0 && meaningful.every((line) => /^\s*\/\//.test(line))
+  const out = lines.map((line) => {
+    if (line.trim() === '') return line
+    return allCommented ? line.replace(/^(\s*)\/\/ ?/, '$1') : line.replace(/^(\s*)/, '$1// ')
+  })
+  replaceBlock(start, end, lines, out)
+}
+
 const customOption = document.createElement('option')
 customOption.value = ''
 customOption.textContent = '自定义代码…'
@@ -203,11 +274,66 @@ runBtn.addEventListener('click', () => {
   render(editor.value)
   saveState()
 })
+shareBtn?.addEventListener('click', () => {
+  const url = `${location.origin}${location.pathname}#${shareHash()}`
+  const label = shareBtn.textContent ?? '分享'
+  const flash = (text: string): void => {
+    shareBtn.textContent = text
+    window.setTimeout(() => {
+      shareBtn.textContent = label
+    }, 1600)
+  }
+  navigator.clipboard.writeText(url).then(
+    () => {
+      flash('已复制')
+      setStatus('分享链接已复制到剪贴板，包含当前代码与后端选择')
+    },
+    () => {
+      location.hash = shareHash()
+      flash('手动复制')
+      setStatus('剪贴板不可用：分享链接已写入地址栏，请手动复制')
+    }
+  )
+})
 showDisasm.addEventListener('change', () => {
   render(editor.value)
   saveState()
 })
 editor.addEventListener('input', scheduleRender)
+editor.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Tab') {
+    event.preventDefault()
+    if (event.shiftKey) {
+      reindent(true)
+    } else if (editor.selectionStart === editor.selectionEnd) {
+      const pos = editor.selectionStart
+      const value = editor.value
+      setEditorValue(`${value.slice(0, pos)}    ${value.slice(pos)}`, pos + 4)
+    } else {
+      reindent(false)
+    }
+    return
+  }
+  if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    const value = editor.value
+    const start = editor.selectionStart
+    const end = editor.selectionEnd
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1
+    const before = value.slice(lineStart, start)
+    let indent = /^[ \t]*/.exec(before)?.[0] ?? ''
+    const lastChar = before.trimEnd().slice(-1)
+    if (lastChar === '{' || lastChar === '[' || lastChar === '(') indent += '    '
+    const insert = `\n${indent}`
+    setEditorValue(value.slice(0, start) + insert + value.slice(end), start + insert.length)
+    return
+  }
+  if (event.key === '/' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    toggleComment()
+  }
+})
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
     event.preventDefault()
@@ -217,8 +343,15 @@ document.addEventListener('keydown', (event) => {
 })
 window.addEventListener('pagehide', saveState)
 
-const saved = loadState()
-if (saved) {
+const shared = loadShared()
+const saved = shared ? null : loadState()
+if (shared) {
+  editor.value = shared.code
+  backendSel.value = shared.backend
+  showDisasm.checked = false
+  exampleSel.value = ''
+  history.replaceState(null, '', location.pathname + location.search)
+} else if (saved) {
   editor.value = saved.code
   backendSel.value = saved.backend
   showDisasm.checked = saved.disasm

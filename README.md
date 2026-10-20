@@ -1,7 +1,10 @@
 # Cha（茶）☕
 
-> 用 **TypeScript 从零手写**的微型编程语言：手写词法分析器 → 递归下降解析器 → 静态作用域解析 → 树遍历求值器。
+> 用 **TypeScript 从零手写**的微型编程语言：手写词法分析器 → 递归下降解析器 → 静态作用域解析，
+> 两个可互换的执行后端——树遍历求值器与字节码编译器 + 栈式虚拟机。
 > 零运行时依赖，`src/index.ts` 是纯模块（不依赖 Node API），可以直接编译进浏览器 Playground。
+
+**在线体验**：<https://cha.adcakeyuan.top> —— 浏览器内编辑运行、双后端一键切换、可查看编译出的字节码。
 
 ```cha
 // 一杯茶的时间，看懂这门语言
@@ -21,7 +24,7 @@ pnpm install
 
 pnpm repl                # 交互式 REPL（表达式回显、多行输入、状态共享）
 pnpm cha run examples/hello.cha   # 运行脚本
-pnpm test                # 100 个测试用例
+pnpm test                # 122 个测试用例
 pnpm build               # esbuild 打包成单文件 dist/cha.cjs
 ```
 
@@ -99,7 +102,7 @@ print(茶单["龙井"], len(茶单), has(茶单, "普洱"));  // 30 3 true
   │
   → src/index.ts       对外 API：run() / runVM() / Session / VMSession（纯模块，可进浏览器）
   → src/cli.ts / repl.ts   命令行与交互环境
-  → playground/        浏览器 Playground（双后端切换 + 字节码视图）
+  → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
 ```
 
 两个后端由 **122 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
@@ -135,7 +138,7 @@ pnpm test:watch  # 开发模式
 ## 路线图
 
 - [x] 字节码编译器 + 栈式虚拟机（差分验证：错误信息逐字一致，基准 1.4~3x）
-- [x] 浏览器 Playground（双后端切换 + 字节码视图，`playground/index.html`）
+- [x] 浏览器 Playground（[在线版](https://cha.adcakeyuan.top)，双后端切换 + 字节码视图，`playground/index.html`）
 - [ ] 字符串插值的解析器协同（消掉词法器的歧义报错）
 - [ ] 类与继承（成员方法、this）
 - [ ] try/catch 错误处理
