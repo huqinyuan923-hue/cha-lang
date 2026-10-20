@@ -129,6 +129,18 @@ try {
 `ThrowError`，消息写作 `throw 抛出的值未被捕获：…`，位置取 `throw` 那一行；语法错误、未定义变量这类静态
 错误在程序跑起来之前就断了，压根到不了 try。
 
+CLI 与 Playground 还会把出错的那一行抄在错误下面，插入符按**显示宽度**定位——中文算两格、组合符零格、
+tab 展开成 4 格、emoji 代理对整体算一个字符，超长行围绕插入符裁剪：
+
+```text
+运行时错误（第 3 行，第 12 列）：未定义的变量 '未知变量'
+ 3 | print(结果 + 未知变量);
+   |              ^
+```
+
+片段由 `src/diagnostic.ts` 统一渲染，两个后端、CLI 与 Playground 共用同一份输出。REPL 刻意不显示片段：
+会话里错误的行号可能属于上一段输入，拿当前这段源码去抄只会指错地方。
+
 `return` / `break` / `continue` 可以穿过 `try`，处理器跟着帧一起退，不会留下悬垂的 catch 让后面的错误被
 意外接住。**一个刻意的例外**：循环轮数预算是宿主级的止损，接住超预算的错误之后不会重新充能——同一次运行里
 再进死循环，下一条回跳立刻再撞一次。页面不能因为 catch 过一次就重新拿到无限时间。
@@ -214,11 +226,12 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
                        src/chunk.ts         指令集、常量池与反汇编器
   │
   → src/index.ts       对外 API：run() / runVM() / Session / VMSession（纯模块，可进浏览器）
+  → src/diagnostic.ts  错误片段：源码行 + 显示宽度感知的插入符（CLI 与 Playground 共用）
   → src/cli.ts / repl.ts   命令行与交互环境
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
 ```
 
-两个后端由 **190 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
+两个后端由 **210 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -251,7 +264,7 @@ printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 st
 ## 测试
 
 ```bash
-pnpm test        # 全量 190 个用例（含差分与模糊测试）
+pnpm test        # 全量 210 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 
@@ -262,6 +275,7 @@ pnpm test:watch  # 开发模式
 - [x] `input()` 标准输入（CLI/REPL 同步读 stdin，Playground 用输入对话框）
 - [x] 字符串插值的解析器协同（词法器把 `${...}` 直接扫成一段独立 token，花括号歧义在词法阶段就消解了——这项其实早就做完，缺的是测试，现已用差分用例钉死嵌套、歧义、作用域与报错位置）
 - [x] 类与继承（`init` 构造、字段自由生长、方法共享、`this`、单继承与词法 `super`；方法帧把接收者放槽位 0，两个后端逐字一致）
+- [x] 错误片段（CLI/Playground 共用 `src/diagnostic.ts`：中文/emoji/组合符/tab 感知的插入符与长行裁剪；REPL 因跨段输入刻意不抄源码）
 - [x] try/catch 错误处理（`throw` 扔的是值不是异常对象，运行时错误也能接住、接到的是那句中文消息；`return`/`break`/`continue` 穿过 `try` 时处理器跟着帧一起退，非局部控制流两个后端逐字一致）
 - [ ] 自动分号插入（也许永远不做）
 

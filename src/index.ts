@@ -12,6 +12,8 @@ export { RuntimeError }
 export { compile, FunctionCompiler }
 export { disassemble }
 export type { VMFunction }
+export { formatDiagnostic, formatErrorHeader, sourceExcerpt } from './diagnostic'
+export type { DiagnosticInfo, DiagnosticOptions, ExcerptOptions } from './diagnostic'
 
 export interface ChaErrorInfo {
   name: string

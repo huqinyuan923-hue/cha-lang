@@ -2,7 +2,7 @@
  * Playground 入口：把语言前端 + 树遍历解释器 + 字节码 VM 打进一个 bundle。
  * src/index 不依赖 Node API，这里是唯一接触 DOM 的地方。
  */
-import { run as runTree, runVM } from '../src/index'
+import { formatDiagnostic, formatErrorHeader, run as runTree, runVM, sourceExcerpt } from '../src/index'
 import type { ChaErrorInfo, RunResult } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
@@ -180,8 +180,24 @@ interface SavedState {
   example: string
 }
 
-function formatError(e: ChaErrorInfo): string {
-  return `${e.name}（第 ${e.line} 行，第 ${e.col} 列）：${e.message}`
+function formatError(e: ChaErrorInfo, source: string): string {
+  return formatDiagnostic(source, e)
+}
+
+/** 错误块：标题红色，源码片段整体调暗，只有插入符保持红色 */
+function renderError(e: ChaErrorInfo, source: string): string {
+  const header = `<div class="out-err">${escapeHtml(formatErrorHeader(e))}</div>`
+  const excerpt = sourceExcerpt(source, e.line, e.col)
+  if (excerpt === null) return header
+
+  const split = excerpt.lastIndexOf('\n')
+  const body = excerpt.slice(0, split)
+  const caretLine = excerpt.slice(split + 1)
+  const caretAt = caretLine.lastIndexOf('^')
+  return (
+    `<div class="err-block">${header}<div class="err-snippet">${escapeHtml(body)}\n` +
+    `${escapeHtml(caretLine.slice(0, caretAt))}<span class="err-caret">^</span></div></div>`
+  )
 }
 
 function setStatus(message: string): void {
@@ -241,8 +257,8 @@ function paintResult(result: RunResult, ms: number, src: string): void {
       lastPlainText = asm
       let html = renderDisasm(asm)
       if (result.error) {
-        lastPlainText += `\n\n${formatError(result.error)}`
-        html += `\n\n<span class="out-err">${escapeHtml(formatError(result.error))}</span>`
+        lastPlainText += `\n\n${formatError(result.error, src)}`
+        html += `\n\n${renderError(result.error, src)}`
         setStatus(`运行出错：第 ${result.error.line} 行，第 ${result.error.col} 列`)
       } else {
         setStatus(`运行完成并生成字节码：${result.output.length} 行输出，耗时 ${ms.toFixed(1)} 毫秒`)
@@ -266,9 +282,9 @@ function paintResult(result: RunResult, ms: number, src: string): void {
     lastPlainText += `\n\n${note}`
   }
   if (result.error) {
-    const errLine = formatError(result.error)
+    const errLine = formatError(result.error, src)
     lastPlainText += `${lastPlainText ? '\n\n' : ''}${errLine}`
-    parts.push(`<div class="out-err">\n${errLine}</div>`)
+    parts.push(renderError(result.error, src))
     setStatus(`运行出错：第 ${result.error.line} 行，第 ${result.error.col} 列`)
   } else {
     setStatus(`运行完成：${result.output.length} 行输出，耗时 ${ms.toFixed(1)} 毫秒`)

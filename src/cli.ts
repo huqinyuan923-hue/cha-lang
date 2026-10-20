@@ -7,7 +7,7 @@
  *   cha（或 cha repl）          进入 REPL
  */
 import { readFileSync } from 'fs'
-import { run, runVM } from './index'
+import { formatDiagnostic, run, runVM } from './index'
 import { disassemble } from './chunk'
 import { compile } from './compiler'
 import { parse } from './parser'
@@ -67,7 +67,7 @@ export function main(argv: string[] = process.argv.slice(2)): void {
         resolve(program)
         console.log(disassemble(compile(program)))
       } catch (e) {
-        reportCompileError(e)
+        reportCompileError(e, source)
         process.exit(65)
       }
       return
@@ -81,7 +81,9 @@ export function main(argv: string[] = process.argv.slice(2)): void {
     })
     if (result.error) {
       const e = result.error
-      console.error(`\n${phaseName(e.phase)}错误（第 ${e.line} 行，第 ${e.col} 列）：${e.message}`)
+      const position = e.line > 0 ? `（第 ${e.line} 行，第 ${e.col} 列）` : ''
+      const header = `${phaseName(e.phase)}错误${position}：${e.message}`
+      console.error(`\n${formatDiagnostic(source, e, { header })}`)
       process.exit(70)
     }
     return
@@ -97,14 +99,32 @@ export function main(argv: string[] = process.argv.slice(2)): void {
 }
 
 /** 编译期错误（--disasm 路径）的统一展示 */
-function reportCompileError(e: unknown): void {
+function reportCompileError(e: unknown, source: string): void {
   if (e instanceof Error) {
     const anyE = e as Error & { line?: number; col?: number }
-    const pos = anyE.line ? `（第 ${anyE.line} 行，第 ${anyE.col} 列）` : ''
-    console.error(`${e.name}${pos}：${e.message}`)
+    const line = anyE.line ?? 0
+    const col = anyE.col ?? 0
+    // 错误自身的消息带着内部位置前缀，展示时以结构化行列为准
+    const message = e.message.replace(/^\[line \d+, col \d+\] /, '')
+    const position = line > 0 ? `（第 ${line} 行，第 ${col} 列）` : ''
+    const header = `${compilePhaseName(e.name)}错误${position}：${message}`
+    console.error(formatDiagnostic(source, { name: e.name, message, line, col }, { header }))
     return
   }
   console.error(`错误：${String(e)}`)
+}
+
+function compilePhaseName(name: string): string {
+  switch (name) {
+    case 'LexError':
+      return '词法'
+    case 'ParseError':
+      return '语法'
+    case 'ResolveError':
+      return '作用域'
+    default:
+      return '编译'
+  }
 }
 
 function phaseName(phase: string): string {
