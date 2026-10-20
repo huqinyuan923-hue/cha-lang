@@ -26,6 +26,18 @@ export const MAX_CALL_DEPTH = 500
 /** 两个后端共用的错误文案，保证差分测试逐字一致 */
 export const TOO_DEEP_MESSAGE = `递归太深：调用深度超过 ${MAX_CALL_DEPTH} 层，可能没有出口`
 
+/**
+ * 循环轮数预算的默认值。宿主可以按自己的容忍度改：CLI 挂在那里没人看，
+ * 给足算力；浏览器打字时自动重跑，几百毫秒就得停下来。
+ * 预算数的是「循环体进了多少轮」，两个后端在同一个语义点计数（VM 的 LOOP 回跳 /
+ * 树遍历器的迭代收尾），所以嵌套、break、continue 都算得一一对齐。
+ */
+export const DEFAULT_LOOP_BUDGET = 20_000_000
+
+/** 同样是为了两个后端逐字一致：文案只由这里产出 */
+export const loopBudgetMessage = (budget: number): string =>
+  `循环跑了太多轮（超过 ${budget} 轮），疑似死循环`
+
 export interface ChaFunction {
   type: 'function'
   name?: string

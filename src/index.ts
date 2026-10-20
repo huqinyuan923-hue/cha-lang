@@ -33,6 +33,8 @@ export interface RunOptions {
   clock?: () => number
   /** input() 的数据来源；浏览器 Playground 接 prompt()，CLI 接标准输入 */
   readLine?: ReadLine
+  /** 循环轮数预算：宿主按自己能容忍的卡顿时长决定，两个后端拿同一个数 */
+  loopBudget?: number
 }
 
 /**
@@ -51,6 +53,7 @@ export function run(source: string, options: RunOptions = {}): RunResult {
       output: sink,
       clock: options.clock,
       readLine: options.readLine,
+      loopBudget: options.loopBudget,
     })
     interpreter.run(program)
     return { output }
@@ -136,6 +139,7 @@ export function runVM(source: string, options: RunOptions = {}): RunResult {
       output: sink,
       clock: options.clock,
       readLine: options.readLine,
+      loopBudget: options.loopBudget,
     })
     vm.execute(proto)
     return { output }

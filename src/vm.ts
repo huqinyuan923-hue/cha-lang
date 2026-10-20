@@ -11,12 +11,14 @@ import { Chunk, Op, TemplateInfo, type Upvalue, type VMFunction } from './chunk'
 import {
   ChaFunction,
   ChaMap,
+  DEFAULT_LOOP_BUDGET,
   MAX_CALL_DEPTH,
   RuntimeError,
   TOO_DEEP_MESSAGE,
   formatNumber,
   formatValue,
   isTruthy,
+  loopBudgetMessage,
   typeName,
   valuesEqual,
   type NativeFunction,
@@ -38,8 +40,8 @@ interface Frame {
 export interface VMOptions {
   output?: (text: string) => void
   clock?: () => number
-  /** 最大指令步数（防挂死/调试用）；默认无限制 */
-  maxSteps?: number
+  /** 循环轮数预算（数循环体进了多少轮，不是指令数）；超了就报错，默认 DEFAULT_LOOP_BUDGET */
+  loopBudget?: number
   /** 每条指令执行前的轨迹回调（调试/教学用） */
   trace?: (info: { addr: number; op: string; sp: number; base: number }) => void
   /** input() 的数据来源；不提供则 input() 报「宿主没有提供标准输入」 */
@@ -56,14 +58,14 @@ export class VirtualMachine {
   readonly globals = new Map<string, Value>()
   private output: (text: string) => void
   private clock: () => number
-  private maxSteps: number
-  private steps = 0
+  private loopBudget: number
+  private loops = 0
   private trace?: VMOptions['trace']
 
   constructor(options: VMOptions = {}) {
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
-    this.maxSteps = options.maxSteps ?? Number.POSITIVE_INFINITY
+    this.loopBudget = options.loopBudget ?? DEFAULT_LOOP_BUDGET
     this.trace = options.trace
     for (const native of createBuiltins(this.output, this.clock, options.readLine ?? null)) {
       this.globals.set(native.name, native)
@@ -72,7 +74,7 @@ export class VirtualMachine {
 
   /** 执行一个顶层函数原型（compile() 的产物），直至 RETURN */
   execute(proto: VMFunction): void {
-    this.steps = 0
+    this.loops = 0
     this.frames.push({ closure: this.makeClosure(proto, []), ip: 0, base: 0 })
     this.run()
   }
@@ -104,9 +106,6 @@ export class VirtualMachine {
 
     while (true) {
       const start = ip
-      if (++this.steps > this.maxSteps) {
-        throw err(start, `内部错误：超出单次执行的最大指令数（${this.maxSteps}），疑似死循环`)
-      }
       if (this.trace) {
         this.trace({ addr: start, op: Op[code[start]!] ?? `op${code[start]}`, sp: this.sp, base: frame.base })
       }
@@ -349,6 +348,8 @@ export class VirtualMachine {
         case Op.LOOP: {
           const offset = code[ip]! | (code[ip + 1]! << 8)
           ip += 2 - offset
+          // 一次回跳 = 一轮循环体，树遍历器在同一个语义点计数，两边才能同轮报错
+          if (++this.loops > this.loopBudget) throw err(start, loopBudgetMessage(this.loopBudget))
           break
         }
 

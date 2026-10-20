@@ -143,6 +143,11 @@ print(sum);`,
 const DEFAULT_EXAMPLE = '递归 fib（编译器的主场）'
 const STORAGE_KEY = 'cha-playground-state-v1'
 const MAX_OUTPUT_LINES = 2000
+/**
+ * 打字时会自动重跑，预算必须在一两帧内撞得上：实测树遍历器约 500 万轮/秒，
+ * 200 万轮最多卡 400 毫秒。示例里最重的循环是 20 万轮，离预算还差一个数量级。
+ */
+const LOOP_BUDGET = 2_000_000
 
 interface SavedState {
   code: string
@@ -253,7 +258,10 @@ function render(src: string, interactive = false): void {
   const backend = backendSel.value === 'tree' ? 'tree' : 'vm'
   inputWasSkipped = false
   const readLine = interactive ? dialogReader : silentReader
-  const result = backend === 'vm' ? runVM(src, { readLine }) : runTree(src, { readLine })
+  const result =
+    backend === 'vm'
+      ? runVM(src, { readLine, loopBudget: LOOP_BUDGET })
+      : runTree(src, { readLine, loopBudget: LOOP_BUDGET })
   const ms = performance.now() - t0
   const backendName = backend === 'vm' ? '字节码 VM' : '树遍历'
   timing.textContent = `${backendName} · ${ms.toFixed(1)}ms`
@@ -419,9 +427,9 @@ compareBtn?.addEventListener('click', () => {
   const src = editor.value
   const dialog = makeInputDialog()
   const t0 = performance.now()
-  const vmResult = runVM(src, { readLine: dialog.ask })
+  const vmResult = runVM(src, { readLine: dialog.ask, loopBudget: LOOP_BUDGET })
   const t1 = performance.now()
-  runTree(src, { readLine: dialog.playback })
+  runTree(src, { readLine: dialog.playback, loopBudget: LOOP_BUDGET })
   const t2 = performance.now()
   const vmMs = t1 - t0
   const treeMs = t2 - t1

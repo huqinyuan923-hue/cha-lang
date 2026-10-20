@@ -36,6 +36,8 @@ interface LoopCtx {
   continueDepth: number
   /** break 时槽位回退到的深度（覆盖循环自己的作用域） */
   breakDepth: number
+  /** 循环语句自己的位置：所有回跳都挂它，超预算时两个后端才能报同一行同一列 */
+  node: { line: number; col: number }
 }
 
 const COMPOUND_OPS: Record<string, Op> = {
@@ -234,7 +236,8 @@ export class FunctionCompiler {
             const jump = this.emitJump(Op.JUMP, stmt)
             ctx.continues.push(jump)
           } else {
-            this.emitLoop(ctx.testStart, stmt)
+            // while 的 continue 就是回跳：位置挂循环语句，超预算时两个后端才报同一行列
+            this.emitLoop(ctx.testStart, ctx.node)
           }
         } else {
           const jump = this.emitJump(Op.JUMP, stmt)
@@ -271,7 +274,15 @@ export class FunctionCompiler {
     if (test) this.compileExpr(test)
     const exitJump = test ? this.emitJump(Op.JUMP_IF_FALSE, node) : -1
     const depth = this.slotCount
-    const ctx: LoopCtx = { breaks: [], continues: [], isFor: false, testStart, continueDepth: depth, breakDepth: depth }
+    const ctx: LoopCtx = {
+      breaks: [],
+      continues: [],
+      isFor: false,
+      testStart,
+      continueDepth: depth,
+      breakDepth: depth,
+      node,
+    }
     this.loopCtxs.push(ctx)
     this.compileStmt(body)
     this.loopCtxs.pop()
@@ -295,6 +306,7 @@ export class FunctionCompiler {
       testStart,
       continueDepth: this.slotCount,
       breakDepth,
+      node,
     }
     this.loopCtxs.push(ctx)
     this.compileStmt(stmt.body)

@@ -2,6 +2,7 @@ import type { Expr, Program, Stmt } from './ast'
 import { createBuiltins, type ReadLine } from './builtins'
 import {
   ChaMap,
+  DEFAULT_LOOP_BUDGET,
   Environment,
   MAX_CALL_DEPTH,
   RuntimeError,
@@ -9,6 +10,7 @@ import {
   formatNumber,
   formatValue,
   isTruthy,
+  loopBudgetMessage,
   typeName,
   valuesEqual,
   type NativeFunction,
@@ -30,6 +32,8 @@ export interface InterpreterOptions {
   clock?: () => number
   /** input() 的数据来源；不提供则 input() 报「宿主没有提供标准输入」 */
   readLine?: ReadLine | null
+  /** 循环轮数预算，与 VM 同一语义（数循环体进了多少轮） */
+  loopBudget?: number
 }
 
 type Resolutions = Map<Expr, number>
@@ -42,6 +46,9 @@ export class Interpreter {
   private readLine: ReadLine | null
   /** 当前 cha 函数的调用深度，与 VM 的帧数用同一个上限，错误文案才能一致 */
   private depth = 0
+  /** 已执行的循环轮数，与 VM 的 LOOP 回跳一一对应 */
+  private loops = 0
+  private loopBudget: number
   private resolutions: Resolutions
 
   constructor(resolutions: Resolutions, options: InterpreterOptions = {}) {
@@ -49,6 +56,7 @@ export class Interpreter {
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.readLine = options.readLine ?? null
+    this.loopBudget = options.loopBudget ?? DEFAULT_LOOP_BUDGET
     this.installBuiltins()
   }
 
@@ -58,7 +66,13 @@ export class Interpreter {
   }
 
   run(program: Program): void {
+    this.loops = 0
     for (const stmt of program) this.execStmt(stmt)
+  }
+
+  /** 一轮循环体收尾：与 VM 执行 LOOP 回跳是同一个语义点 */
+  private countLoop(stmt: Stmt): void {
+    if (++this.loops > this.loopBudget) throw this.err(stmt, loopBudgetMessage(this.loopBudget))
   }
 
   // ---------- 语句 ----------
@@ -109,9 +123,9 @@ export class Interpreter {
             this.execStmt(stmt.body)
           } catch (e) {
             if (e instanceof BreakSignal) break
-            if (e instanceof ContinueSignal) continue
-            throw e
+            if (!(e instanceof ContinueSignal)) throw e
           }
+          this.countLoop(stmt)
         }
         return
       }
@@ -129,6 +143,7 @@ export class Interpreter {
               if (!(e instanceof ContinueSignal)) throw e
             }
             if (stmt.update) this.evaluate(stmt.update)
+            this.countLoop(stmt)
           }
         } finally {
           this.env = prev

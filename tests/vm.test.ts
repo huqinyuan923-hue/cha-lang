@@ -380,6 +380,71 @@ describe('VM 与树遍历器差分：调用深度失控', () => {
   })
 })
 
+describe('VM 与树遍历器差分：循环轮数预算', () => {
+  /**
+   * 预算数的是「循环体进了多少轮」：VM 在 LOOP 回跳处计数，树遍历器在每轮收尾处计数。
+   * diff() 先保证两个后端逐字一致（差一轮输出就散），再看读数是否符合语义。
+   */
+  const trip = (src: string, loopBudget: number, expectedOutput: string[]) => {
+    const result = diff(src, { loopBudget })
+    expect(result.error?.message).toBe(`循环跑了太多轮（超过 ${loopBudget} 轮），疑似死循环`)
+    expect(result.output).toEqual(expectedOutput)
+    return result
+  }
+
+  it('while 死循环：第 N+1 轮收尾时才停', () => {
+    const r = trip('var i = 0; while (true) { i = i + 1; print(i); }', 12, [
+      '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13',
+    ])
+    // 报错归位到 while 关键字，两个后端都是这一列
+    expect({ line: r.error?.line, col: r.error?.col }).toEqual({ line: 1, col: 12 })
+  })
+
+  it('for 死循环，update 也算在这一轮里', () => {
+    const r = trip('for (var i = 1; ; i = i + 1) print(i);', 8, ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+    expect({ line: r.error?.line, col: r.error?.col }).toEqual({ line: 1, col: 1 })
+  })
+
+  it('continue 走回跳的那些轮同样计入', () => {
+    // 11 轮里有若干轮被 continue 提前跳到回跳，print 只发生在偶数轮
+    trip('var i = 0; while (true) { i = i + 1; if (i % 2 == 1) continue; print(i); }', 10, ['2', '4', '6', '8', '10'])
+    trip('for (var i = 0; i < 99; i = i + 1) { if (i % 2 == 1) continue; print(i); }', 10, [
+      '0', '2', '4', '6', '8', '10',
+    ])
+  })
+
+  it('break 的那一轮不计入（回跳根本没执行）', () => {
+    // 循环要跑到 i=4 才 break，但只回跳 3 次：预算 3 刚好放过，预算 2 就报
+    const ok = diff('var i = 0; while (true) { i = i + 1; if (i > 3) break; print(i); }', { loopBudget: 3 })
+    expect(ok.output).toEqual(['1', '2', '3'])
+    expect(ok.error).toBeUndefined()
+    trip('var i = 0; while (true) { i = i + 1; if (i > 3) break; print(i); }', 2, ['1', '2', '3'])
+  })
+
+  it('嵌套循环：内层每一轮、外层每一轮都算', () => {
+    // 外层一轮 = 内层 3 轮 + 自己 1 轮 = 4 次计数；预算 10 停在第 3 个外层轮的内层第 3 轮
+    trip('for (var i = 0; i < 99; i = i + 1) { print("o"); for (var j = 0; j < 3; j = j + 1) print("i"); }', 10, [
+      'o', 'i', 'i', 'i', 'o', 'i', 'i', 'i', 'o', 'i', 'i', 'i',
+    ])
+  })
+
+  it('函数里的循环，调用深度不占循环预算', () => {
+    const ok = diff('fn count(n) { var i = 0; while (i < n) { i = i + 1; } return i; } print(count(5));', {
+      loopBudget: 8,
+    })
+    expect(ok.output).toEqual(['5'])
+    expect(ok.error).toBeUndefined()
+  })
+
+  it('预算之内行为完全不变', () => {
+    const r = diff('var s = ""; for (var i = 0; i < 5; i = i + 1) { s = s + "x"; } print(s);', {
+      loopBudget: 5,
+    })
+    expect(r.output).toEqual(['xxxxx'])
+    expect(r.error).toBeUndefined()
+  })
+})
+
 describe('VM 专属：字节码与反汇编', () => {
   it('反汇编输出包含指令与位置', () => {
     const proto = compile(parse('var x = 1; print(x + 2);'))
