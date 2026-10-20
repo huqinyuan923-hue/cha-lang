@@ -3,7 +3,15 @@
  * 内建函数内部抛出的 RuntimeError 不带行列信息（0,0），由调用点归位。
  */
 import { RuntimeError } from './values'
-import { ChaMap, formatValue, inspectValue, typeName, type NativeFunction, type Value } from './values'
+import {
+  ChaMap,
+  formatValue,
+  inspectValue,
+  typeName,
+  valuesEqual,
+  type NativeFunction,
+  type Value,
+} from './values'
 
 /** 宿主提供的行读取：返回不含换行的一行，输入结束（EOF）返回 null */
 export type ReadLine = (prompt: string | null) => string | null
@@ -100,6 +108,63 @@ export function createBuiltins(
       if (step > 0) for (let i = start; i < stop; i += step) out.push(i)
       else for (let i = start; i > stop; i += step) out.push(i)
       return out
+    }),
+    native('split', 2, (args) => {
+      const s = args[0]!
+      const sep = args[1]!
+      if (typeof s !== 'string' || typeof sep !== 'string') {
+        throw new RuntimeError(`split() 需要两个字符串，得到 ${typeName(s)} 和 ${typeName(sep)}`)
+      }
+      return s.split(sep)
+    }),
+    native('join', 2, (args) => {
+      const arr = args[0]!
+      const sep = args[1]!
+      if (!Array.isArray(arr) || typeof sep !== 'string') {
+        throw new RuntimeError(`join() 需要 (数组, 字符串)，得到 ${typeName(arr)} 和 ${typeName(sep)}`)
+      }
+      return arr.map((item) => formatValue(item)).join(sep)
+    }),
+    native('trim', 1, (args) => {
+      const s = args[0]!
+      if (typeof s !== 'string') throw new RuntimeError(`trim() 只能用于字符串，得到 ${typeName(s)}`)
+      return s.trim()
+    }),
+    native('lower', 1, (args) => {
+      const s = args[0]!
+      if (typeof s !== 'string') throw new RuntimeError(`lower() 只能用于字符串，得到 ${typeName(s)}`)
+      return s.toLowerCase()
+    }),
+    native('upper', 1, (args) => {
+      const s = args[0]!
+      if (typeof s !== 'string') throw new RuntimeError(`upper() 只能用于字符串，得到 ${typeName(s)}`)
+      return s.toUpperCase()
+    }),
+    native('contains', 2, (args) => {
+      const haystack = args[0]!
+      const needle = args[1]!
+      if (typeof haystack === 'string') {
+        if (typeof needle !== 'string') {
+          throw new RuntimeError(`contains(字符串, x) 的 x 也得是字符串，得到 ${typeName(needle)}`)
+        }
+        return haystack.includes(needle)
+      }
+      if (Array.isArray(haystack)) return haystack.some((item) => valuesEqual(item, needle))
+      throw new RuntimeError(`contains() 只能用于字符串或数组，map 请用 has()，得到 ${typeName(haystack)}`)
+    }),
+    native('slice', 'variadic', (args) => {
+      if (args.length < 2 || args.length > 3) {
+        throw new RuntimeError(`slice() 需要 2~3 个参数，收到 ${args.length} 个`)
+      }
+      const v = args[0]!
+      const start = args[1]!
+      const end = args.length === 3 ? args[2] : undefined
+      if (typeof start !== 'number' || (end !== undefined && typeof end !== 'number')) {
+        throw new RuntimeError(`slice() 的下标必须是数字，得到 ${typeName(start)} 和 ${typeName(end ?? null)}`)
+      }
+      if (typeof v === 'string') return v.slice(start, end)
+      if (Array.isArray(v)) return v.slice(start, end)
+      throw new RuntimeError(`slice() 只能用于字符串或数组，得到 ${typeName(v)}`)
     }),
     native('input', 'variadic', (args) => {
       if (args.length > 1) {

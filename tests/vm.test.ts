@@ -241,6 +241,70 @@ describe('VM 与树遍历器差分：标准输入 input()', () => {
   })
 })
 
+describe('VM 与树遍历器差分：字符串工具', () => {
+  it('split / join / trim / lower / upper 的正常路径', () => {
+    diff('print(split("a,b,c", ","));')
+    // 空分隔符按码点拆开
+    diff('print(split("中文", ""));')
+    // join 里嵌套数组的格式化
+    diff('print(join(["x", 1, [2, 3]], "-"));')
+    diff('print(trim("  空格  "));')
+    diff('print(upper("Mix中文"), lower("MIX中文"));')
+    diff('var parts = split("甲,乙,丙", ","); print(join(parts, "|"), len(parts));')
+  })
+
+  it('contains 的字符串 / 数组 / nil 语义', () => {
+    diff('print(contains("手写语言", "语"), contains("手写语言", "茶"), contains("", ""));')
+    diff('print(contains([1, 2, 3], 2));')
+    // 数字与字符串不相等
+    diff('print(contains([1, 2], "1"));')
+    diff('print(contains([nil, true], nil), contains([nil], false));')
+    diff('print(contains([[1, 2], 3], [1, 2]));')
+  })
+
+  it('slice 的正负下标与缺省 end', () => {
+    diff('print(slice("手写一门语言", 0, 2));')
+    diff('print(slice("abcdef", -3));')
+    diff('print(slice([1, 2, 3, 4], 1), slice([1, 2, 3], 1, 2));')
+    diff('print(slice("abc", 0, 0), slice([], 0), type(slice("abc", 9)));')
+  })
+
+  it('参数类型错误必须逐字对齐', () => {
+    diff('print(split(1, ","));')
+    diff('print(split("a", 1));')
+    diff('print(join("ab", ","));')
+    diff('print(join([1], 2));')
+    diff('print(trim(1));')
+    diff('print(upper(1));')
+    diff('print(lower(true));')
+    diff('print(contains("s", 1));')
+    diff('print(contains({a: 1}, "a"));')
+    diff('print(contains(1, 1));')
+    diff('print(slice(1, 0));')
+    diff('print(slice("abc", "x"));')
+    diff('print(slice({a: 1}, 0, 1));')
+  })
+
+  it('variadic 的个数检查：两个后端走不同代码路径', () => {
+    // slice 声明为 variadic，个数校验发生在内建函数里，
+    // 而固定元数内建函数（split/join/trim/contains）的个数校验发生在各自后端 CALL 之前
+    const few = diff('print(slice("abc"));')
+    expect(few.error).toMatchObject({ phase: 'runtime', line: 1 })
+    expect(few.error!.message).toContain('slice() 需要 2~3 个参数，收到 1 个')
+
+    const many = diff('print(slice("abc", 0, 1, 2));')
+    expect(many.error).toMatchObject({ phase: 'runtime', line: 1 })
+    expect(many.error!.message).toContain('slice() 需要 2~3 个参数，收到 4 个')
+
+    const noArg = diff('print(slice());')
+    expect(noArg.error!.message).toContain('slice() 需要 2~3 个参数，收到 0 个')
+
+    diff('print(split("a,b"));')
+    diff('print(trim("x", "y"));')
+    diff('print(contains([1], 1, 2));')
+  })
+})
+
 describe('VM 与树遍历器差分：错误必须逐字对齐', () => {
   it('算术与类型错误', () => {
     diff('print(1 / 0);')

@@ -92,7 +92,13 @@ print(茶单["龙井"], len(茶单), has(茶单, "普洱"));  // 30 3 true
 
 ### 内建函数
 
-`print(...)` `clock()` `len(x)` `type(x)` `str(x)` `num(s)` `floor(n)` `abs(n)` `push(arr, v)` `pop(arr)` `keys(m)` `values(m)` `has(m, k)` `range(a[, b[, step]])` `input([提示语])`
+`print(...)` `clock()` `len(x)` `type(x)` `str(x)` `num(s)` `floor(n)` `abs(n)` `push(arr, v)` `pop(arr)` `keys(m)` `values(m)` `has(m, k)` `range(a[, b[, step]])` `input([提示语])` `split(s, sep)` `join(arr, sep)` `trim(s)` `lower(s)` `upper(s)` `contains(v, x)` `slice(v, start[, end])`
+
+字符串工具是后加的：一开始字符串只有 `len`、下标和插值，切个 csv、判断包含、取个子串都得手写循环，
+写示例时才发现有多别扭。`contains` 对字符串查子串、对数组查成员（map 请用 `has`）；
+`slice` 对字符串给子串、对数组给子数组，下标允许负数，缺省 `end` 到结尾。
+字符串一律按 UTF-16 码元计算（`len("👍")` 是 2，下标和 `split(s, "")` 也会把代理对劈成两半）——
+这是玩具阶段的已知取舍，跟 `len`/下标从一开始就是码元语义保持一致。
 
 `input()` 读一行（不含换行），参数是会原样写到标准输出的提示语；输入结束（EOF）返回 `nil`。
 CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框——只在点「运行」时弹，
@@ -116,7 +122,7 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
 ```
 
-两个后端由 **129 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
+两个后端由 **136 个测试 + 300 个种子的差分模糊测试**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -149,7 +155,7 @@ printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 st
 ## 测试
 
 ```bash
-pnpm test        # 全量 129 个用例（含差分与模糊测试）
+pnpm test        # 全量 136 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 

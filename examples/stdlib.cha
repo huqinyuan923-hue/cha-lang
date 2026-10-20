@@ -22,3 +22,22 @@ print(floor(3.99), abs(-7), num("42") + 1, str(42) + "!");
 
 // range 三件套
 print(range(3), range(1, 4), range(10, 0, -3));
+
+// 字符串工具：切分与拼接
+print(split("a,b,c", ","));
+print(split("中文", ""));
+print(join(["苹果", "橘子"], "、"));
+print(join([1, [2, 3]], "-"));
+
+// 修剪与大小写（中文原样保留）
+print(trim("  两端空格  "));
+print(upper("Mix中文"), lower("Mix中文"));
+
+// contains：字符串查子串，数组查成员；map 用 has
+print(contains("手写一门编程语言", "语言"));
+print(contains([1, "1", true, nil], 1), contains([1, 2], "1"), contains([1, 2], nil));
+
+// slice：字符串给子串，数组给子数组，支持负数下标
+print(slice("手写一门编程语言", 0, 2));
+print(slice("abcdef", -3));
+print(slice([1, 2, 3, 4], 1), slice([1, 2, 3, 4], 1, 3));

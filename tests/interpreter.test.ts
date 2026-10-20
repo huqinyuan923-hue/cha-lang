@@ -313,6 +313,41 @@ describe('内建函数', () => {
     expect(noHost.error).toMatchObject({ phase: 'runtime', line: 1 })
     expect(noHost.error!.message).toContain('宿主没有提供标准输入')
   })
+
+  it('split / join / trim / lower / upper / contains / slice 的具体取值', () => {
+    expect(execute('print(split("a,b,c", ","));').output).toEqual(['[a, b, c]'])
+    expect(execute('print(split("中文", ""));').output).toEqual(['[中, 文]'])
+    // join 的元素按 print 的方式格式化：数组仍渲染成 [a, b, c]
+    expect(execute('print(join(["x", 1, [2, 3]], "-"));').output).toEqual(['x-1-[2, 3]'])
+    expect(execute('print(trim("  空格  "));').output).toEqual(['空格'])
+    expect(execute('print(upper("Mix中文"), lower("MIX中文"));').output).toEqual(['MIX中文 mix中文'])
+    expect(execute('print(contains("手写语言", "语"));').output).toEqual(['true'])
+    expect(execute('print(contains([1, 2, 3], 2));').output).toEqual(['true'])
+    // 数字与字符串不算相等
+    expect(execute('print(contains([1, 2], "1"));').output).toEqual(['false'])
+    expect(execute('print(contains([nil, true], nil));').output).toEqual(['true'])
+    expect(execute('print(slice("手写一门语言", 0, 2));').output).toEqual(['手写'])
+    expect(execute('print(slice("abcdef", -3));').output).toEqual(['def'])
+    expect(execute('print(slice([1, 2, 3, 4], 1));').output).toEqual(['[2, 3, 4]'])
+    expect(execute('print(slice([1, 2, 3], 1, 2));').output).toEqual(['[2]'])
+  })
+
+  it('字符串工具的类型与参数个数报错', () => {
+    const runtimeError = (src: string, fragment: string) => {
+      const r = execute(src)
+      expect(r.error).toMatchObject({ phase: 'runtime', line: 1 })
+      expect(r.error!.message).toContain(fragment)
+    }
+    runtimeError('print(split(1, ","));', 'split() 需要两个字符串')
+    runtimeError('print(join("ab", ","));', 'join() 需要 (数组, 字符串)')
+    runtimeError('print(trim(1));', 'trim() 只能用于字符串')
+    runtimeError('print(contains("s", 1));', 'contains(字符串, x) 的 x 也得是字符串')
+    runtimeError('print(contains({a: 1}, "a"));', 'contains() 只能用于字符串或数组')
+    runtimeError('print(slice(1, 0));', 'slice() 只能用于字符串或数组')
+    // slice 是 variadic：个数校验发生在内建函数自己身上
+    runtimeError('print(slice("abc"));', 'slice() 需要 2~3 个参数，收到 1 个')
+    runtimeError('print(slice("abc", 0, 1, 2));', 'slice() 需要 2~3 个参数，收到 4 个')
+  })
 })
 
 describe('错误定位与结构化返回', () => {

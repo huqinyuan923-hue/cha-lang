@@ -107,6 +107,13 @@ for (var i = 0; i < len(数据) - 1; i += 1) {
     }
 }
 print("排序后：\${数据}");`,
+  '字符串工具': `// split / join / trim / contains / slice
+var 行 = "  苹果,橘子,桃子  ";
+var 水果 = split(trim(行), ",");
+print("切分：\${水果}");
+print("拼接：\${join(水果, "、")}");
+print("查找：\${contains(水果, "橘子")}, \${contains("手写语言", "语言")}");
+print("切片：\${slice(水果, 1)}, \${slice(行, 2, 5)}, \${slice(水果, -1)}");`,
   '运行时错误演示': `// 出错也不怕：输出区会给出准确的错误名、行号与列号
 print("这行会先执行");
 var 结果 = 未知变量 + 1;
