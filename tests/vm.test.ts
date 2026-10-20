@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { run, runVM, type RunOptions } from '../src/index'
+import { run, runVM, Session, VMSession, type RunOptions } from '../src/index'
 import { disassemble } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
@@ -1026,5 +1026,32 @@ describe('VM 专属：字节码与反汇编', () => {
       // 示例里的 input() 统一喂一行固定文本
       diff(readFileSync(join(dir, file), 'utf-8'), { readLine: () => '示例输入' })
     }
+  })
+})
+
+describe('会话（Session / VMSession）跨段类声明', () => {
+  const classSource = `class 茶 {
+    init(名字) { this.名字 = 名字; }
+    介绍() { return this.名字; }
+}
+class 普洱 < 茶 {
+    介绍() { return super.介绍() + "！"; }
+}`
+
+  it('树遍历会话：上一段声明的类在下一段照常调用（this/super 不丢解析结果）', () => {
+    const out: string[] = []
+    const session = new Session({ output: (text) => out.push(text) })
+    expect(session.run(classSource).error).toBeUndefined()
+    const result = session.run('var p = 普洱("熟普"); print(p.介绍());\nvar f = p.介绍; print(f());')
+    expect(result.error).toBeUndefined()
+    expect(out).toEqual(['熟普！', '熟普！'])
+  })
+
+  it('字节码会话跨段行为与树遍历会话一致', () => {
+    const session = new VMSession()
+    expect(session.run(classSource).error).toBeUndefined()
+    const result = session.run('var p = 普洱("熟普"); print(p.介绍());')
+    expect(result.error).toBeUndefined()
+    expect(result.output).toEqual(['熟普！'])
   })
 })

@@ -67,10 +67,11 @@ export class Interpreter {
   /** 已执行的循环轮数，与 VM 的 LOOP 回跳一一对应 */
   private loops = 0
   private loopBudget: number
-  private resolutions: Resolutions
+  /** 用 WeakMap 累积：会话里早先声明的函数体还活着，它们的解析结果就不能丢 */
+  private resolutions = new WeakMap<Expr, number>()
 
   constructor(resolutions: Resolutions, options: InterpreterOptions = {}) {
-    this.resolutions = resolutions
+    this.addResolutions(resolutions)
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.readLine = options.readLine ?? null
@@ -78,9 +79,9 @@ export class Interpreter {
     this.installBuiltins()
   }
 
-  /** REPL/会话场景：每段新代码有自己的作用域解析结果，但共享全局环境 */
-  setResolutions(resolutions: Resolutions): void {
-    this.resolutions = resolutions
+  /** REPL/会话场景：把新一段代码的解析结果并进当前表，早先函数的距离仍然有效 */
+  addResolutions(resolutions: Resolutions): void {
+    for (const [expr, dist] of resolutions) this.resolutions.set(expr, dist)
   }
 
   run(program: Program): void {

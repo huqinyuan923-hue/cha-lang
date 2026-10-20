@@ -218,7 +218,7 @@ CLI 与 REPL 走真实标准输入，Playground 用浏览器的输入对话框�
   → playground/        浏览器 Playground（在线版 <https://cha.adcakeyuan.top>，双后端切换 + 字节码视图）
 ```
 
-两个后端由 **188 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
+两个后端由 **190 个测试（含 300 个种子的差分模糊测试）**保证行为逐字一致——
 包括错误信息里的行号和列号。
 
 ## 基准（Node 24，Windows，中位数）
@@ -251,7 +251,7 @@ printf '张三\n42\n' | pnpm cha run examples/input.cha   # input() 逐行读 st
 ## 测试
 
 ```bash
-pnpm test        # 全量 188 个用例（含差分与模糊测试）
+pnpm test        # 全量 190 个用例（含差分与模糊测试）
 pnpm test:watch  # 开发模式
 ```
 

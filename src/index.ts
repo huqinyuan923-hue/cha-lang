@@ -126,7 +126,7 @@ export class Session {
   run(source: string): RunResult {
     try {
       const program = parse(source)
-      this.interpreter.setResolutions(resolve(program))
+      this.interpreter.addResolutions(resolve(program))
       this.interpreter.run(program)
       return { output: [] }
     } catch (e) {
