@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://cha.adcakeyuan.top/sitemap.xml

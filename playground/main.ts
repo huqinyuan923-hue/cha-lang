@@ -18,6 +18,9 @@ const exampleSel = document.getElementById('example') as HTMLSelectElement
 const showDisasm = document.getElementById('showDisasm') as HTMLInputElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
 const shareBtn = document.getElementById('share') as HTMLButtonElement | null
+const copyBtn = document.getElementById('copy') as HTMLButtonElement | null
+
+let lastPlainText = ''
 
 const EXAMPLES: Record<string, string> = {
   '递归 fib（编译器的主场）': `// 经典递归：字节码 VM 省掉了每次重新走 AST 的开销
@@ -149,17 +152,18 @@ function render(src: string): void {
     try {
       const program = parse(src)
       resolve(program)
+      const asm = disassemble(compile(program))
       output.className = 'disasm'
-      output.textContent = disassemble(compile(program))
+      lastPlainText = asm
+      let html = renderDisasm(asm)
       if (result.error) {
-        const err = document.createElement('span')
-        err.className = 'out-err'
-        err.textContent = `\n\n${formatError(result.error)}`
-        output.appendChild(err)
+        lastPlainText += `\n\n${formatError(result.error)}`
+        html += `\n\n<span class="out-err">${escapeHtml(formatError(result.error))}</span>`
         setStatus(`运行出错：第 ${result.error.line} 行，第 ${result.error.col} 列`)
       } else {
         setStatus(`运行完成并生成字节码：${result.output.length} 行输出，耗时 ${ms.toFixed(1)} 毫秒`)
       }
+      output.innerHTML = html
       output.scrollTop = 0
       return
     } catch {
@@ -169,8 +173,11 @@ function render(src: string): void {
 
   output.className = ''
   const parts: string[] = result.output.map((line) => `<div class="out-line">${escapeHtml(line)}</div>`)
+  lastPlainText = result.output.join('\n')
   if (result.error) {
-    parts.push(`<div class="out-err">\n${formatError(result.error)}</div>`)
+    const errLine = formatError(result.error)
+    lastPlainText += `${lastPlainText ? '\n\n' : ''}${errLine}`
+    parts.push(`<div class="out-err">\n${errLine}</div>`)
     setStatus(`运行出错：第 ${result.error.line} 行，第 ${result.error.col} 列`)
   } else {
     setStatus(`运行完成：${result.output.length} 行输出，耗时 ${ms.toFixed(1)} 毫秒`)
@@ -181,6 +188,37 @@ function render(src: string): void {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** 反汇编文本 → 着色 HTML：地址/操作码/字符串常量/跳转目标/源位置分色。 */
+function renderDisasm(text: string): string {
+  const rows: string[] = []
+  for (const line of text.split('\n')) {
+    if (line.startsWith('==')) {
+      rows.push(`<div class="d-fn">${escapeHtml(line)}</div>`)
+      continue
+    }
+    const m = /^(\s*)(\d+)(\s+)([A-Z_0-9]+)(\s+)(.*?)(\s*); (\d+):(\d+)$/.exec(line)
+    if (!m) {
+      rows.push(`<div>${escapeHtml(line)}</div>`)
+      continue
+    }
+    const operand = escapeHtml(m[6]!)
+      .replace(/("(?:[^"\\]|\\.)*")/g, '<span class="d-str">$1</span>')
+      .replace(/(->\s*\d+)/g, '<span class="d-jump">$1</span>')
+    rows.push(
+      `<div>${m[1]}<span class="d-addr">${m[2]}</span>${m[3]}<span class="d-op">${m[4]}</span>${m[5]}${operand}<span class="d-pos">${m[7]}; ${m[8]}:${m[9]}</span></div>`
+    )
+  }
+  return rows.join('')
+}
+
+function flashButton(btn: HTMLButtonElement, text: string): void {
+  if (!btn.dataset.label) btn.dataset.label = btn.textContent ?? ''
+  btn.textContent = text
+  window.setTimeout(() => {
+    btn.textContent = btn.dataset.label ?? ''
+  }, 1600)
 }
 
 function setEditorValue(next: string, selStart: number, selEnd: number = selStart): void {
@@ -276,22 +314,27 @@ runBtn.addEventListener('click', () => {
 })
 shareBtn?.addEventListener('click', () => {
   const url = `${location.origin}${location.pathname}#${shareHash()}`
-  const label = shareBtn.textContent ?? '分享'
-  const flash = (text: string): void => {
-    shareBtn.textContent = text
-    window.setTimeout(() => {
-      shareBtn.textContent = label
-    }, 1600)
-  }
   navigator.clipboard.writeText(url).then(
     () => {
-      flash('已复制')
+      flashButton(shareBtn, '已复制')
       setStatus('分享链接已复制到剪贴板，包含当前代码与后端选择')
     },
     () => {
       location.hash = shareHash()
-      flash('手动复制')
+      flashButton(shareBtn, '手动复制')
       setStatus('剪贴板不可用：分享链接已写入地址栏，请手动复制')
+    }
+  )
+})
+copyBtn?.addEventListener('click', () => {
+  navigator.clipboard.writeText(lastPlainText || '(无输出)').then(
+    () => {
+      flashButton(copyBtn, '已复制')
+      setStatus('输出已复制到剪贴板')
+    },
+    () => {
+      flashButton(copyBtn, '复制失败')
+      setStatus('剪贴板不可用，复制失败')
     }
   )
 })
