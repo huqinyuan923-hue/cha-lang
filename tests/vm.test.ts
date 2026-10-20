@@ -445,6 +445,89 @@ describe('VM 与树遍历器差分：循环轮数预算', () => {
   })
 })
 
+describe('VM 与树遍历器差分：字符串插值', () => {
+  /** 词法器把插值表达式扫成独立的 token 序列，两个后端必须解析出同一棵树 */
+  const both = (src: string, expected: string[]) => {
+    const result = diff(src)
+    expect(result.output).toEqual(expected)
+    expect(result.error).toBeUndefined()
+  }
+
+  it('基本形态：单插值、多插值、紧邻', () => {
+    both('var 名字 = "茶"; print("你好 ${名字}！");', ['你好 茶！'])
+    both('print("a${1}b${2 + 3}c");', ['a1b5c'])
+    both('print("${1}"); print("${2}");', ['1', '2'])
+    both('print("纯文本没有插值");', ['纯文本没有插值'])
+  })
+
+  it('转义优先于插值触发', () => {
+    both('print("价格 \\${不是插值} 100");', ['价格 ${不是插值} 100'])
+    both('print("两个美元 $$ 和 $x");', ['两个美元 $$ 和 $x'])
+  })
+
+  it('插值里再套字符串、数组、map 下标（花括号歧义）', () => {
+    both('print("${ "内层字符串" }");', ['内层字符串'])
+    both('print("${ {a: 1}["a"] }");', ['1'])
+    both('print("${ {a: {b: 2}}["a"]["b"] }");', ['2'])
+    both('print("${ [1, 2, 3][1] }");', ['2'])
+    both('print("数组 ${[1, {a: 2}]} 结束");', ['数组 [1, {"a": 2}] 结束'])
+  })
+
+  it('多层嵌套插值', () => {
+    both('print("${"外${"内"}外"}");', ['外内外'])
+    both('var s = "值"; print("插值里再插值 ${ "内层 ${s}" } 结束");', ['插值里再插值 内层 值 结束'])
+    both('print("${"a${"b${"c${1 + 1}d"}c"}b"}a");', ['abc2dcba'])
+    both('print("${ "外${ {k: 1}["k"] }内" }");', ['外1内'])
+  })
+
+  it('插值里可以是任何表达式：三目、短路、函数调用、匿名函数', () => {
+    both('print("${ 1 > 2 ? "大" : "小" }");', ['小'])
+    both('print("${ nil or "兜底" }");', ['兜底'])
+    both('print("${len("abc")}");', ['3'])
+    both('print("${ (fn(a) { return a * 2; })(21) }");', ['42'])
+    both('var n = 2; print("${n}2" == "22");', ['true'])
+  })
+
+  it('插值走作用域：局部变量与 upvalue', () => {
+    both('fn f() { var y = 2; return "内层 ${y}"; } print(f());', ['内层 2'])
+    both('fn outer() { var c = 7; fn inner() { return "${c}"; } return inner(); } print(outer());', ['7'])
+    // 嵌套字符串按 formatValue 原样输出，不带引号 —— 看得出是插值结果，但类型要靠 type() 证明
+    both(
+      'fn make() { var k = 0; fn bump() { k = k + 1; return "#${k}"; } return [bump(), bump()]; } print(make());',
+      ['[#1, #2]']
+    )
+    both(
+      'fn make() { var k = 0; fn bump() { k = k + 1; return "#${k}"; } return [bump(), bump()]; } print(type(make()[0]));',
+      ['string']
+    )
+  })
+
+  it('插值出现在 map 值、数组元素、跨行与注释里', () => {
+    both('var m = {k: "${1 + 1}", b: 2}; print(m["k"], m);', ['2 {"k": 2, "b": 2}'])
+    both('print([1, "${2 + 2}", 3]);', ['[1, 4, 3]'])
+    both('print(type([1, "${2 + 2}", 3][1]));', ['string'])
+    both('print("${\n  1 + 1\n}");', ['2'])
+    both('print("${ 1 /* 块注释 */ + 2 }");', ['3'])
+    both('var x = 1; // 注释里出现 ${ 不算插值\nprint("${x}");', ['1'])
+  })
+
+  it('插值的错误：阶段、文案与位置两个后端一致', () => {
+    const errs = (src: string) => {
+      const r = diff(src)
+      expect(r.output).toEqual([])
+      expect(r.error).toBeDefined()
+      return { phase: r.error!.phase, name: r.error!.name, message: r.error!.message, line: r.error!.line, col: r.error!.col }
+    }
+    expect(errs('print("${1);')).toEqual({ phase: 'lex', name: 'LexError', message: '插值表达式缺少匹配的 }', line: 1, col: 8 })
+    expect(errs('print("a ${1 + 2");')).toEqual({ phase: 'lex', name: 'LexError', message: '字符串缺少收尾的双引号', line: 1, col: 18 })
+    expect(errs('print("${}");')).toEqual({ phase: 'parse', name: 'ParseError', message: "这里不能出现 'EOF'", line: 1, col: 10 })
+    expect(errs('print("${ var x = 1; x }");')).toEqual({ phase: 'parse', name: 'ParseError', message: "这里不能出现 'var'", line: 1, col: 11 })
+    expect(errs('print("${ 1; }");')).toEqual({ phase: 'parse', name: 'ParseError', message: '插值表达式只能是一个表达式', line: 1, col: 12 })
+    // 未定义变量归位到 ${ 处，而不是整条字符串的开头
+    expect(errs('print("你好 ${名字}！");')).toEqual({ phase: 'runtime', name: 'RuntimeError', message: "未定义的变量 '名字'", line: 1, col: 13 })
+  })
+})
+
 describe('VM 专属：字节码与反汇编', () => {
   it('反汇编输出包含指令与位置', () => {
     const proto = compile(parse('var x = 1; print(x + 2);'))
