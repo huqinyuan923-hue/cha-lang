@@ -1,5 +1,7 @@
 # Cha（茶）☕
 
+[![CI](https://github.com/huqinyuan923-hue/cha-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/huqinyuan923-hue/cha-lang/actions/workflows/ci.yml)
+
 > 用 **TypeScript 从零手写**的微型编程语言：手写词法分析器 → 递归下降解析器 → 静态作用域解析，
 > 两个可互换的执行后端——树遍历求值器与字节码编译器 + 栈式虚拟机。
 > 零运行时依赖，`src/index.ts` 是纯模块（不依赖 Node API），可以直接编译进浏览器 Playground。

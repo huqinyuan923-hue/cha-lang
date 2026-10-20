@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: 安装依赖（锁定文件校验）
+        run: pnpm install --frozen-lockfile
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 单元测试
+        run: pnpm test
+      - name: 构建 CLI
+        run: pnpm build
+      - name: 冒烟运行（双后端 CLI 与 Playground 打包）
+        run: |
+          node dist/cha.cjs run examples/hello.cha
+          node dist/cha.cjs run examples/hello.cha --tree
+          pnpm playground

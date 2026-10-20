@@ -2,6 +2,21 @@
   "name": "cha-lang",
   "version": "0.1.0",
   "description": "Cha（茶）—— 用 TypeScript 从零手写的微型编程语言：词法器 → 解析器 → 两个执行后端（树遍历解释器 + 字节码虚拟机）",
+  "homepage": "https://cha.adcakeyuan.top",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/huqinyuan923-hue/cha-lang.git"
+  },
+  "bugs": "https://github.com/huqinyuan923-hue/cha-lang/issues",
+  "keywords": [
+    "programming-language",
+    "interpreter",
+    "bytecode",
+    "virtual-machine",
+    "compiler",
+    "typescript",
+    "toy-language"
+  ],
   "type": "module",
   "private": true,
   "engines": {
