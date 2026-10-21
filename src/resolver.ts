@@ -92,7 +92,7 @@ export function resolve(program: Program): Map<Expr, number> {
     return null
   }
 
-  function resolveIdentifier(expr: Extract<Expr, { type: 'identifier' }>, isWrite: boolean): void {
+  function resolveIdentifier(expr: Extract<Expr, { type: 'identifier' }>, isWrite: boolean): number | null {
     for (let i = scopes.length - 1; i >= 0; i--) {
       const scope = scopes[i]!
       if (scope.names.has(expr.name)) {
@@ -103,8 +103,10 @@ export function resolve(program: Program): Map<Expr, number> {
             expr.col
           )
         }
-        resolutions.set(expr, scopes.length - 1 - i)
-        return
+        const dist = scopes.length - 1 - i
+        // 读取的距离挂在标识符节点上；写入的距离由调用方挂到 assign 节点
+        if (!isWrite) resolutions.set(expr, dist)
+        return dist
       }
     }
     // 全局层：检查读取未初始化的变量
@@ -115,6 +117,7 @@ export function resolve(program: Program): Map<Expr, number> {
         expr.col
       )
     }
+    return null
   }
 
   function resolveExpr(expr: Expr): void {
@@ -122,7 +125,8 @@ export function resolve(program: Program): Map<Expr, number> {
       case 'literal':
         return
       case 'identifier':
-        return resolveIdentifier(expr, false)
+        resolveIdentifier(expr, false)
+        return
       case 'template':
         for (const sub of expr.exprs) resolveExpr(sub)
         return
@@ -158,10 +162,11 @@ export function resolve(program: Program): Map<Expr, number> {
         return resolveExpr(expr.target)
       case 'assign':
         if (expr.target.kind === 'identifier') {
-          resolveIdentifier(
+          const dist = resolveIdentifier(
             { type: 'identifier', name: expr.target.name, line: expr.target.line, col: expr.target.col },
             true
           )
+          if (dist !== null) resolutions.set(expr, dist)
         } else if (expr.target.kind === 'index') {
           resolveExpr(expr.target.target)
           resolveExpr(expr.target.index)

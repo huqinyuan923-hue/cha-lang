@@ -44,6 +44,11 @@ function catchBinding(e: unknown): { value: Value } | null {
   return null
 }
 
+/** 复合赋值的二元运算符：'+=' → '+'（索引取首字符，避免热点路径上分配字符串） */
+function compoundOp(op: '+=' | '-=' | '*=' | '/=' | '%='): '+' | '-' | '*' | '/' | '%' {
+  return op[0] as '+' | '-' | '*' | '/' | '%'
+}
+
 export interface InterpreterOptions {
   /** print 的去处（默认丢弃）；REPL/CLI 接 stdout，测试接数组 */
   output?: (text: string) => void
@@ -97,7 +102,7 @@ export class Interpreter {
   // ---------- 语句 ----------
 
   private execStmts(stmts: Stmt[]): void {
-    for (const stmt of stmts) this.execStmt(stmt)
+    for (let i = 0; i < stmts.length; i++) this.execStmt(stmts[i]!)
   }
 
   private execStmt(stmt: Stmt): void {
@@ -286,7 +291,8 @@ export class Interpreter {
           : this.evaluate(expr.alternate)
       case 'call': {
         const callee = this.evaluate(expr.callee)
-        const args = expr.args.map((arg) => this.evaluate(arg))
+        const args: Value[] = new Array(expr.args.length)
+        for (let i = 0; i < args.length; i++) args[i] = this.evaluate(expr.args[i]!)
         return this.call(callee, args, expr)
       }
       case 'index': {
@@ -328,24 +334,24 @@ export class Interpreter {
 
   /** super.方法 的接收者：沿环境链找最近的 this（this 是关键字，不会被用户变量遮蔽） */
   private lookupThis(): Value {
-    let scope: Environment | undefined = this.env
-    while (scope) {
-      if (scope.isDeclared('this')) return scope.get('this', 0)
-      scope = scope.parent
-    }
-    throw new Error('内部错误：找不到 this')
+    const slot = this.env.find('this')
+    if (!slot) throw new Error('内部错误：找不到 this')
+    return slot.value
   }
 
   /** 标识符取值：resolver 给了距离就跳层；全局（无记录）按名字回溯 */
   private lookup(expr: Extract<Expr, { type: 'identifier' }>): Value {
     const dist = this.resolutions.get(expr)
     if (dist !== undefined && dist >= 0) return this.env.get(expr.name, dist)
-    let scope: Environment | undefined = this.env
-    while (scope) {
-      if (scope.isDeclared(expr.name)) return scope.get(expr.name, 0)
-      scope = scope.parent
-    }
-    throw this.err(expr, `未定义的变量 '${expr.name}'`)
+    return this.lookupDynamic(expr.name, expr)
+  }
+
+  /** 全局/未解析的名字：沿链查一次 Map/层，找不到才算未定义 */
+  private lookupDynamic(name: string, node: { line: number; col: number }): Value {
+    const slot = this.env.find(name)
+    if (!slot) throw this.err(node, `未定义的变量 '${name}'`)
+    if (!slot.initialized) throw new Error(`变量 ${name} 在声明前不可使用`)
+    return slot.value
   }
 
   private err(node: { line: number; col: number }, message: string): RuntimeError {
@@ -466,35 +472,24 @@ export class Interpreter {
 
     if (target.kind === 'identifier') {
       let value = this.evaluate(expr.value)
-      const ref: Expr = {
-        type: 'identifier',
-        name: target.name,
-        line: target.line,
-        col: target.col,
-      }
+      // 写入距离由 resolver 挂在 assign 节点上；全局写入没有距离，走动态链
+      const dist = this.resolutions.get(expr)
       if (expr.op !== '=') {
+        const current =
+          dist !== undefined && dist >= 0
+            ? this.env.get(target.name, dist)
+            : this.lookupDynamic(target.name, target)
         value = this.binary(
-          expr.op.replace('=', '') as '+',
+          compoundOp(expr.op),
           expr,
-          this.lookup(ref),
+          current,
           value
         )
       }
-      const dist = this.resolutions.get(ref)
       if (dist !== undefined && dist >= 0) {
         this.env.assign(target.name, dist, value)
-      } else {
-        let scope: Environment | undefined = this.env
-        let found = false
-        while (scope) {
-          if (scope.isDeclared(target.name)) {
-            scope.assign(target.name, 0, value)
-            found = true
-            break
-          }
-          scope = scope.parent
-        }
-        if (!found) throw this.err(expr, `未定义的变量 '${target.name}'`)
+      } else if (!this.env.assignDynamic(target.name, value)) {
+        throw this.err(expr, `未定义的变量 '${target.name}'`)
       }
       return value
     }
@@ -504,7 +499,7 @@ export class Interpreter {
       const key = this.evaluate(target.index)
       let value = this.evaluate(expr.value)
       if (expr.op !== '=') {
-        value = this.binary(expr.op.replace('=', '') as '+', expr, this.readIndex(expr, obj, key), value)
+        value = this.binary(compoundOp(expr.op), expr, this.readIndex(expr, obj, key), value)
       }
       this.writeIndex(expr, obj, key, value)
       return value
@@ -514,7 +509,7 @@ export class Interpreter {
     const obj = this.evaluate(target.target)
     let value = this.evaluate(expr.value)
     if (expr.op !== '=') {
-      value = this.binary(expr.op.replace('=', '') as '+', expr, this.readIndex(expr, obj, target.key), value)
+      value = this.binary(compoundOp(expr.op), expr, this.readIndex(expr, obj, target.key), value)
     }
     this.writeIndex(expr, obj, target.key, value)
     return value
@@ -606,7 +601,9 @@ export class Interpreter {
     this.depth++
     try {
       if (receiver) local.declare('this', receiver, true)
-      callee.params.forEach((p, i) => local.declare(p, args[i]!, true))
+      for (let i = 0; i < callee.params.length; i++) {
+        local.declare(callee.params[i]!, args[i]!, true)
+      }
       this.env = local
       this.execStmts(callee.body)
     } catch (e) {

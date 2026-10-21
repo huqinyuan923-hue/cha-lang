@@ -151,8 +151,10 @@ export class ChaMap {
   readonly map = new Map<Value, Value>()
 }
 
+export type EnvSlot = { value: Value; initialized: boolean }
+
 export class Environment {
-  private values = new Map<string, { value: Value; initialized: boolean }>()
+  private values = new Map<string, EnvSlot>()
 
   constructor(public parent?: Environment) {}
 
@@ -160,12 +162,30 @@ export class Environment {
     this.values.set(name, { value, initialized })
   }
 
-  isDeclared(name: string): boolean {
-    return this.values.has(name)
+  /** 沿作用域链找一次名字，每层只查一次 Map（动态查找的公共路径） */
+  find(name: string): EnvSlot | undefined {
+    let env: Environment | undefined = this
+    while (env) {
+      const slot = env.values.get(name)
+      if (slot) return slot
+      env = env.parent
+    }
+    return undefined
   }
 
-  isInitialized(name: string): boolean {
-    return this.values.get(name)?.initialized === true
+  /** 沿作用域链找到就写入并返回 true；找不到返回 false */
+  assignDynamic(name: string, value: Value): boolean {
+    let env: Environment | undefined = this
+    while (env) {
+      const slot = env.values.get(name)
+      if (slot) {
+        slot.value = value
+        slot.initialized = true
+        return true
+      }
+      env = env.parent
+    }
+    return false
   }
 
   /** 沿作用域链向上走 dist 步取值（dist 由 resolver 预计算，0 = 当前层） */
