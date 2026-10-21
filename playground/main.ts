@@ -4,7 +4,7 @@
  */
 import { formatDiagnostic, formatErrorHeader, run as runTree, runVM, sourceExcerpt } from '../src/index'
 import type { ChaErrorInfo, RunOptions, RunResult, VMTraceStep } from '../src/index'
-import { disassemble } from '../src/chunk'
+import { disassembleRows, type DisasmRow } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
 import { resolve } from '../src/resolver'
@@ -33,6 +33,8 @@ const tracePlay = document.getElementById('tracePlay') as HTMLButtonElement
 const traceNext = document.getElementById('traceNext') as HTMLButtonElement
 const traceLast = document.getElementById('traceLast') as HTMLButtonElement
 const traceCopy = document.getElementById('traceCopy') as HTMLButtonElement
+const traceExport = document.getElementById('traceExport') as HTMLButtonElement
+const traceSource = document.getElementById('traceSource') as HTMLPreElement
 const runBtn = document.getElementById('run') as HTMLButtonElement
 const shareBtn = document.getElementById('share') as HTMLButtonElement | null
 const copyBtn = document.getElementById('copy') as HTMLButtonElement | null
@@ -204,6 +206,7 @@ const MAX_TRACE_STEPS = 5000
 const TRACE_PLAY_MS = 120
 const TRACE_WINDOW_BEFORE = 2
 const TRACE_WINDOW_AFTER = 2
+const TRACE_PAGE_JUMP = 10
 
 interface SavedState {
   code: string
@@ -287,10 +290,10 @@ function paintResult(result: RunResult, ms: number, src: string): void {
     try {
       const program = parse(src)
       resolve(program)
-      const asm = disassemble(compile(program))
+      const rows = disassembleRows(compile(program))
       output.className = 'disasm'
-      lastPlainText = asm
-      let html = renderDisasm(asm)
+      lastPlainText = rows.map((row) => row.text).join('\n')
+      let html = renderDisasm(rows)
       if (result.error) {
         lastPlainText += `\n\n${formatError(result.error, src)}`
         html += `\n\n${renderError(result.error, src)}`
@@ -335,7 +338,7 @@ let traceIndex = 0
 let traceTimer: number | undefined
 let traceTruncated = false
 
-const TRACE_BUTTONS = [traceFirst, tracePrev, tracePlay, traceNext, traceLast, traceCopy]
+const TRACE_BUTTONS = [traceFirst, tracePrev, tracePlay, traceNext, traceLast, traceCopy, traceExport]
 const TRACE_EMPTY_HINT = '按「运行」采集轨迹'
 const TRACE_EMPTY_ERROR = '程序没有执行到任何指令（编译未通过）'
 
@@ -381,8 +384,10 @@ function renderTrace(): void {
     traceStackInfo.textContent = ''
     traceStack.textContent = '（空）'
     traceWindow.replaceChildren()
+    traceSource.replaceChildren()
     traceNote.hidden = true
     traceNote.textContent = ''
+    clearDisasmHighlight()
     return
   }
 
@@ -408,6 +413,8 @@ function renderTrace(): void {
 
   traceWindow.replaceChildren(...traceWindowRows())
   renderTraceStack(step)
+  renderTraceSource(step)
+  highlightDisasm(step)
 
   traceNote.hidden = !traceTruncated
   traceNote.textContent = traceTruncated
@@ -421,11 +428,13 @@ function traceRowText(step: VMTraceStep, marker: string): string {
 
 /** 当前步的纯文本快照，供「复制本步」使用 */
 function traceStepText(step: VMTraceStep): string {
+  const excerpt = sourceExcerpt(editor.value, step.line, step.col)
   const lines = [
     `Cha 执行轨迹 第 ${step.step + 1} / ${traceSteps.length} 步`,
     `函数：${step.fn}（深度 ${step.depth}，地址 ${step.addr}）`,
     `调用栈：${step.frames.join(' › ')}`,
     `当前指令：${step.op} · 第 ${step.line} 行，第 ${step.col} 列`,
+    ...(excerpt === null ? [] : ['当前源码：', ...excerpt.split('\n')]),
     '指令窗口：',
     ...traceWindowRows().map((row) => row.textContent ?? ''),
     `栈快照（执行前 · sp=${step.sp}）：`,
@@ -434,6 +443,32 @@ function traceStepText(step: VMTraceStep): string {
   else lines.push(...step.stack.map((item) => `[${item.slot}] ${item.text}`))
   if (traceTruncated) lines.push(`轨迹只记录了前 ${MAX_TRACE_STEPS} 步，程序本身已完整执行`)
   return lines.join('\n')
+}
+
+/** 整段轨迹（含源码与每步状态）下载为 JSON，浏览器里也能离线分析 */
+function downloadTrace(): void {
+  if (traceSteps.length === 0) return
+  const payload = {
+    format: 'cha-trace',
+    version: 1,
+    backend: 'vm',
+    limit: MAX_TRACE_STEPS,
+    truncated: traceTruncated,
+    total: traceSteps.length,
+    source: editor.value,
+    steps: traceSteps,
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `cha-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  flashButton(traceExport, '已导出')
+  setStatus(`已导出 ${traceSteps.length} 步轨迹（JSON）`)
 }
 
 /** 当前步前后各 2 步，全部用 textContent 生成（轨迹内容来自用户程序） */
@@ -470,6 +505,64 @@ function renderTraceStack(step: VMTraceStep): void {
   }
   const overflow = step.sp - step.base > step.stack.length
   traceStackInfo.textContent = `执行前 · sp=${step.sp}${overflow ? ' · 只显示栈顶 8 个槽位' : ''}`
+}
+
+/** 当前指令对应的源码行：源码文本走 textContent，只有插入符是受控标记 */
+function renderTraceSource(step: VMTraceStep): void {
+  const excerpt = sourceExcerpt(editor.value, step.line, step.col)
+  if (excerpt === null) {
+    traceSource.textContent = '（源码不可用）'
+    return
+  }
+  const split = excerpt.lastIndexOf('\n')
+  const caretLine = split < 0 ? '' : excerpt.slice(split + 1)
+  const caretAt = caretLine.lastIndexOf('^')
+  if (split < 0 || caretAt < 0) {
+    traceSource.textContent = excerpt
+    return
+  }
+  const caret = document.createElement('span')
+  caret.className = 'trace-caret'
+  caret.textContent = '^'
+  traceSource.replaceChildren(
+    document.createTextNode(`${excerpt.slice(0, split)}\n${caretLine.slice(0, caretAt)}`),
+    caret,
+    document.createTextNode(caretLine.slice(caretAt + 1))
+  )
+}
+
+function clearDisasmHighlight(): void {
+  output.querySelectorAll('.d-current').forEach((row) => row.classList.remove('d-current'))
+}
+
+/** 反汇编视图在场时，把当前轨迹步对应的指令行标出来（同名匿名函数可能命中多行） */
+function highlightDisasm(step: VMTraceStep): void {
+  clearDisasmHighlight()
+  if (!showDisasm.checked) return
+  const addr = String(step.addr)
+  let first: HTMLElement | null = null
+  for (const row of Array.from(output.querySelectorAll<HTMLElement>('.d-row[data-addr]'))) {
+    if (row.dataset.addr !== addr || row.dataset.fn !== step.fn) continue
+    row.classList.add('d-current')
+    first ??= row
+  }
+  first?.scrollIntoView({ block: 'nearest' })
+}
+
+/** 找到相邻步之间发生深度变化的位置：进入函数（调用）或回到调用者（返回） */
+function findDepthChange(from: number, dir: 1 | -1, kind: 'call' | 'return'): number | null {
+  for (let i = from; i > 0 && i < traceSteps.length; i += dir) {
+    const previous = traceSteps[i - 1]!
+    const current = traceSteps[i]!
+    const hit = kind === 'call' ? current.depth > previous.depth : current.depth < previous.depth
+    if (hit) return i
+  }
+  return null
+}
+
+function jumpDepthChange(kind: 'call' | 'return', dir: 1 | -1): void {
+  const target = findDepthChange(traceIndex + dir, dir, kind)
+  if (target !== null) goTrace(target)
 }
 
 function goTrace(next: number): void {
@@ -539,27 +632,31 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** 反汇编文本 → 着色 HTML：地址/操作码/字符串常量/跳转目标/源位置分色。 */
-function renderDisasm(text: string): string {
-  const rows: string[] = []
-  for (const line of text.split('\n')) {
-    if (line.startsWith('==')) {
-      rows.push(`<div class="d-fn">${escapeHtml(line)}</div>`)
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+/** 反汇编行 → 着色 HTML：地址/操作码/字符串常量/跳转目标/源位置分色。 */
+function renderDisasm(disasmRows: DisasmRow[]): string {
+  const html: string[] = []
+  for (const row of disasmRows) {
+    if (row.kind === 'fn') {
+      html.push(`<div class="d-fn" data-fn="${escapeAttr(row.fn)}">${escapeHtml(row.text)}</div>`)
       continue
     }
-    const m = /^(\s*)(\d+)(\s+)([A-Z_0-9]+)(\s+)(.*?)(\s*); (\d+):(\d+)$/.exec(line)
+    const m = /^(\s*)(\d+)(\s+)([A-Z_0-9]+)(\s+)(.*?)(\s*); (\d+):(\d+)$/.exec(row.text)
     if (!m) {
-      rows.push(`<div>${escapeHtml(line)}</div>`)
+      html.push(`<div class="d-row" data-fn="${escapeAttr(row.fn)}" data-addr="${row.addr}">${escapeHtml(row.text)}</div>`)
       continue
     }
     const operand = escapeHtml(m[6]!)
       .replace(/("(?:[^"\\]|\\.)*")/g, '<span class="d-str">$1</span>')
       .replace(/(->\s*\d+)/g, '<span class="d-jump">$1</span>')
-    rows.push(
-      `<div>${m[1]}<span class="d-addr">${m[2]}</span>${m[3]}<span class="d-op">${m[4]}</span>${m[5]}${operand}<span class="d-pos">${m[7]}; ${m[8]}:${m[9]}</span></div>`
+    html.push(
+      `<div class="d-row" data-fn="${escapeAttr(row.fn)}" data-addr="${row.addr}">${m[1]}<span class="d-addr">${m[2]}</span>${m[3]}<span class="d-op">${m[4]}</span>${m[5]}${operand}<span class="d-pos">${m[7]}; ${m[8]}:${m[9]}</span></div>`
     )
   }
-  return rows.join('')
+  return html.join('')
 }
 
 function flashButton(btn: HTMLButtonElement, text: string): void {
@@ -751,6 +848,7 @@ traceCopy.addEventListener('click', () => {
     }
   )
 })
+traceExport.addEventListener('click', downloadTrace)
 traceRange.addEventListener('input', () => {
   stopTracePlayback()
   traceIndex = Number(traceRange.value) || 0
@@ -776,6 +874,34 @@ tracePanel.addEventListener('keydown', (event) => {
     case 'End':
       event.preventDefault()
       goTrace(traceSteps.length - 1)
+      break
+    case '[':
+    case '【':
+      event.preventDefault()
+      jumpDepthChange('call', -1)
+      break
+    case ']':
+    case '】':
+      event.preventDefault()
+      jumpDepthChange('call', 1)
+      break
+    case '{':
+    case '｛':
+      event.preventDefault()
+      jumpDepthChange('return', -1)
+      break
+    case '}':
+    case '｝':
+      event.preventDefault()
+      jumpDepthChange('return', 1)
+      break
+    case 'PageUp':
+      event.preventDefault()
+      goTrace(traceIndex - TRACE_PAGE_JUMP)
+      break
+    case 'PageDown':
+      event.preventDefault()
+      goTrace(traceIndex + TRACE_PAGE_JUMP)
       break
     case ' ':
       if (event.target instanceof HTMLButtonElement) return

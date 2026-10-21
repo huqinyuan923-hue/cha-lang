@@ -194,14 +194,44 @@ const U16_OPS = new Set([
   Op.GET_SUPER_METHOD,
 ])
 
+export type DisasmRow =
+  | { kind: 'fn'; fn: string; text: string }
+  | {
+      kind: 'op'
+      fn: string
+      text: string
+      addr: number
+      op: string
+      operand: string
+      line: number
+      col: number
+    }
+
 /**
- * 反汇编一个函数的字节码。行号/列号一并展示，跳转指令标出目标地址。
- * CLOSURE 会递归展开内嵌函数体。
+ * 结构化反汇编：文本与 disassemble 完全一致，额外带上每行所属函数与地址，
+ * 便于调用方做轨迹联动。CLOSURE 的内嵌函数体会紧跟在该指令之后展开。
  */
+export function disassembleRows(fn: VMFunction, label = 'script'): DisasmRow[] {
+  const rows: DisasmRow[] = []
+  emitDisasmRows(fn, label, rows)
+  return rows
+}
+
+/** 反汇编一个函数的字节码。行号/列号一并展示，跳转指令标出目标地址。 */
 export function disassemble(fn: VMFunction, label = 'script'): string {
-  const out: string[] = []
+  return disassembleRows(fn, label)
+    .map((row) => row.text)
+    .join('\n')
+}
+
+function emitDisasmRows(fn: VMFunction, label: string, rows: DisasmRow[]): void {
   const chunk = fn.chunk
-  out.push(`== ${fn.name ?? label} (arity ${fn.arity}, upvalues ${fn.upvalueCount}) ==`)
+  const fnName = fn.name ?? label
+  rows.push({
+    kind: 'fn',
+    fn: fnName,
+    text: `== ${fnName} (arity ${fn.arity}, upvalues ${fn.upvalueCount}) ==`,
+  })
 
   let ip = 0
   const pad = (n: number | string, w: number): string => String(n).padStart(w, ' ')
@@ -212,7 +242,16 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
     const col = chunk.cols[addr]!
     const head = `${pad(addr, 4)}  ${pad(OP_NAMES[op] ?? `op${op}`, 20)}`
     const note = (text: string): void => {
-      out.push(`${head} ${text}  ; ${line}:${col}`)
+      rows.push({
+        kind: 'op',
+        fn: fnName,
+        text: text === '' ? `${head}   ; ${line}:${col}` : `${head} ${text}  ; ${line}:${col}`,
+        addr,
+        op: OP_NAMES[op] ?? `op${op}`,
+        operand: text,
+        line,
+        col,
+      })
     }
 
     if (U16_OPS.has(op)) {
@@ -267,7 +306,7 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
         upvalues.push(`${isLocal ? 'local' : 'upval'} ${index}`)
       }
       note(`${pad(fnIdx, 5)}  upvalues: [${upvalues.join(', ')}]`)
-      out.push(disassemble(proto, proto.name ?? '匿名函数'))
+      emitDisasmRows(proto, proto.name ?? '匿名函数', rows)
       continue
     }
 
@@ -278,5 +317,4 @@ export function disassemble(fn: VMFunction, label = 'script'): string {
 
     note('')
   }
-  return out.join('\n')
 }

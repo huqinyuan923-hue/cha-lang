@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { run, runVM, Session, VMSession, type RunOptions, type VMTraceStep } from '../src/index'
-import { disassemble } from '../src/chunk'
+import { disassemble, disassembleRows } from '../src/chunk'
 import { compile } from '../src/compiler'
 import { parse } from '../src/parser'
 import { formatTraceValue } from '../src/values'
@@ -1154,6 +1154,24 @@ describe('VM 专属：字节码与反汇编', () => {
     expect(text).toContain('ADD')
     expect(text).toContain('RETURN')
     expect(text).toMatch(/; \d+:\d+/)
+  })
+
+  it('结构化反汇编与文本逐字一致，嵌套函数之后的父函数行仍归父函数', () => {
+    const proto = compile(
+      parse('fn 加(a, b) { return a + b; }\nvar x = 加(1, 2);\nfn 减(a, b) { return a - b; }\nprint(x);\nprint(减(5, 2));')
+    )
+    const rows = disassembleRows(proto)
+    expect(rows.map((row) => row.text).join('\n')).toBe(disassemble(proto))
+    expect(rows.filter((row) => row.kind === 'fn').map((row) => row.fn)).toEqual(['script', '加', '减'])
+    // 反汇编把内嵌函数体插在 CLOSURE 之后；减 的函数体结束后，后续指令必须回到 script
+    const scriptAddresses = rows.flatMap((row) => (row.kind === 'op' && row.fn === 'script' ? [row.addr] : []))
+    expect(scriptAddresses).toEqual([0, 3, 6, 9, 12, 15, 17, 20, 23, 26, 29, 32, 34, 35, 38, 41, 44, 47, 49, 51, 52, 53])
+    expect(rows.some((row) => row.kind === 'op' && row.fn === '减' && row.addr === 0 && row.op === 'GET_LOCAL')).toBe(true)
+  })
+
+  it('结构化反汇编用 class.method 标注方法行', () => {
+    const rows = disassembleRows(compile(parse('class A { m() { return 1; } }')))
+    expect(rows.some((row) => row.kind === 'op' && row.fn === 'A.m' && row.op === 'RETURN')).toBe(true)
   })
 
   it('示例程序全部可跑且两个后端一致', () => {

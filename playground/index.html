@@ -77,6 +77,8 @@
   .d-str { color: var(--ok); }
   .d-jump { color: var(--flow); }
   .d-pos { color: var(--dim); }
+  .d-row.d-current { background: #2c2518; box-shadow: inset 3px 0 0 var(--accent); }
+  .d-row.d-current .d-op { color: #f0c46a; }
   .out-err { color: var(--err); }
   .err-block { margin-top: 8px; min-width: 0; max-width: 100%; }
   .err-snippet { color: var(--dim); white-space: pre; overflow-x: auto; line-height: 1.5; max-width: 100%; box-sizing: border-box; }
@@ -95,6 +97,13 @@
   .trace-window { border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
   .trace-line { padding: 2px 8px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--dim); }
   .trace-line.current { color: var(--text); background: #26221a; border-left: 3px solid var(--accent); padding-left: 5px; font-weight: 600; }
+  .trace-help { line-height: 1.5; }
+  .trace-source {
+    margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: #191611; color: var(--dim); font-size: 12px; line-height: 1.5;
+    white-space: pre; overflow-x: auto; max-height: 84px; flex: none;
+  }
+  .trace-caret { color: var(--accent); font-weight: 700; }
   .trace-stack { display: flex; flex-direction: column; gap: 2px; max-height: 84px; overflow: auto; }
   .trace-slot { overflow-wrap: anywhere; }
   .trace-slot-index { color: var(--dim); display: inline-block; min-width: 38px; }
@@ -164,12 +173,16 @@
         <input id="traceRange" type="range" min="0" max="0" value="0" step="1" aria-label="轨迹进度" />
         <span id="traceCount" class="meta">第 0 / 0 步</span>
         <button id="traceCopy" type="button" title="复制当前步的指令、调用栈与栈快照">复制本步</button>
+        <button id="traceExport" type="button" title="把源码与整段轨迹下载为 JSON">导出 JSON</button>
       </div>
       <div id="traceEmpty" class="trace-empty meta">按「运行」采集轨迹</div>
       <div id="traceBody" class="trace-body" hidden>
+        <div class="trace-help meta">←/→ 逐步 · Home/End 首尾 · [ ] 调用 · { } 返回 · PgUp/PgDn ±10 · 空格播放</div>
         <div class="trace-head"><span class="trace-label">调用栈</span><span id="traceFrames" class="trace-frames"></span></div>
         <div class="trace-label">当前指令</div>
         <div id="traceWindow" class="trace-window"></div>
+        <div class="trace-label">当前源码</div>
+        <pre id="traceSource" class="trace-source"></pre>
         <div class="trace-head"><span class="trace-label">栈快照</span><span id="traceStackInfo" class="meta"></span></div>
         <div id="traceStack" class="trace-stack"></div>
         <div id="traceNote" class="trace-note" hidden></div>

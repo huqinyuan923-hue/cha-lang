@@ -3,7 +3,7 @@ import { LexError } from './lexer'
 import { parse, ParseError } from './parser'
 import { ResolveError, resolve } from './resolver'
 import { compile, FunctionCompiler } from './compiler'
-import { disassemble, type VMFunction } from './chunk'
+import { disassemble, disassembleRows, type DisasmRow, type VMFunction } from './chunk'
 import { ThrowSignal, uncaughtThrowMessage } from './values'
 import { VirtualMachine } from './vm'
 import type { VMOptions, VMTraceStep } from './vm'
@@ -11,8 +11,8 @@ import type { ReadLine } from './builtins'
 
 export { RuntimeError }
 export { compile, FunctionCompiler }
-export { disassemble }
-export type { VMFunction }
+export { disassemble, disassembleRows }
+export type { DisasmRow, VMFunction }
 export type { VMTraceStep }
 export { formatDiagnostic, formatErrorHeader, sourceExcerpt } from './diagnostic'
 export type { DiagnosticInfo, DiagnosticOptions, ExcerptOptions } from './diagnostic'
