@@ -201,6 +201,13 @@ const MAX_OUTPUT_LINES = 2000
  * 200 万轮最多卡 400 毫秒。示例里最重的循环是 20 万轮，离预算还差一个数量级。
  */
 const LOOP_BUDGET = 2_000_000
+/**
+ * print 次数预算：循环不轮转也能靠每轮狂打印拖垮页面，这里在收集端先止损。
+ * 2 万行远高于任何示例的输出量，又能在几十毫秒内撞上。
+ */
+const OUTPUT_BUDGET = 20_000
+/** range() 单次分配预算：再大就会在浏览器里卡住甚至吃光内存 */
+const RANGE_BUDGET = 2_000_000
 /** 轨迹最多记录/回放多少步：足够覆盖教学示例，又不会把浏览器拖垮 */
 const MAX_TRACE_STEPS = 5000
 const TRACE_PLAY_MS = 120
@@ -603,7 +610,12 @@ function render(src: string, interactive = false): void {
   const collectTrace = interactive && backend === 'vm' && showTrace.checked
   const readLine = interactive ? dialogReader : silentReader
   const steps: VMTraceStep[] = []
-  const runOptions: RunOptions = { readLine, loopBudget: LOOP_BUDGET }
+  const runOptions: RunOptions = {
+    readLine,
+    loopBudget: LOOP_BUDGET,
+    maxOutputLines: OUTPUT_BUDGET,
+    maxRangeLength: RANGE_BUDGET,
+  }
   if (collectTrace) {
     runOptions.trace = (step) => steps.push(step)
     runOptions.traceLimit = MAX_TRACE_STEPS
@@ -793,7 +805,12 @@ compareBtn?.addEventListener('click', () => {
   resetTrace()
   const steps: VMTraceStep[] = []
   const collectTrace = showTrace.checked && backendSel.value !== 'tree'
-  const vmOptions: RunOptions = { readLine: dialog.ask, loopBudget: LOOP_BUDGET }
+  const vmOptions: RunOptions = {
+    readLine: dialog.ask,
+    loopBudget: LOOP_BUDGET,
+    maxOutputLines: OUTPUT_BUDGET,
+    maxRangeLength: RANGE_BUDGET,
+  }
   if (collectTrace) {
     vmOptions.trace = (step) => steps.push(step)
     vmOptions.traceLimit = MAX_TRACE_STEPS
@@ -801,7 +818,12 @@ compareBtn?.addEventListener('click', () => {
   const t0 = performance.now()
   const vmResult = runVM(src, vmOptions)
   const t1 = performance.now()
-  runTree(src, { readLine: dialog.playback, loopBudget: LOOP_BUDGET })
+  runTree(src, {
+    readLine: dialog.playback,
+    loopBudget: LOOP_BUDGET,
+    maxOutputLines: OUTPUT_BUDGET,
+    maxRangeLength: RANGE_BUDGET,
+  })
   const t2 = performance.now()
   const vmMs = t1 - t0
   const treeMs = t2 - t1

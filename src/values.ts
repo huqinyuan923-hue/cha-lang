@@ -65,6 +65,24 @@ export const DEFAULT_LOOP_BUDGET = 20_000_000
 export const loopBudgetMessage = (budget: number): string =>
   `循环跑了太多轮（超过 ${budget} 轮），疑似死循环`
 
+/**
+ * print 次数预算。循环预算挡不住「循环不多、每轮狂打印」的形状：
+ * 浏览器里几十万行输出会把 DOM 和内存一起拖垮。数的是 print 调用次数，
+ * 宿主按容忍度自行设置（Playground 给 2 万行，CLI 流式写 stdout 不设上限）。
+ */
+export const outputLimitMessage = (limit: number): string =>
+  `输出太多行了（超过 ${limit} 行），已停止运行`
+
+/**
+ * range() 一次最多分配多少个元素。range(0, Infinity) 或超大跨度会直接
+ * 申请一个几十 GB 的数组，循环预算还没来得及计数就先 OOM；分配前先按
+ * 跨度估算，超限就报这条错，两个后端共用同一份实现与文案。
+ */
+export const DEFAULT_MAX_RANGE_LENGTH = 10_000_000
+
+export const rangeLimitMessage = (limit: number): string =>
+  `range() 一次生成太多元素（超过 ${limit} 个），已停止分配`
+
 export interface ChaFunction {
   type: 'function'
   name?: string

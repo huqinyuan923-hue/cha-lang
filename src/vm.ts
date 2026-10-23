@@ -14,6 +14,7 @@ import {
   ChaInstance,
   ChaMap,
   DEFAULT_LOOP_BUDGET,
+  DEFAULT_MAX_RANGE_LENGTH,
   MAX_CALL_DEPTH,
   RuntimeError,
   TOO_DEEP_MESSAGE,
@@ -99,6 +100,8 @@ export interface VMOptions {
   clock?: () => number
   /** 循环轮数预算（数循环体进了多少轮，不是指令数）；超了就报错，默认 DEFAULT_LOOP_BUDGET */
   loopBudget?: number
+  /** range() 单次最多分配的元素个数；默认 DEFAULT_MAX_RANGE_LENGTH */
+  maxRangeLength?: number
   /** 每条指令执行前的轨迹回调（调试/教学用） */
   trace?: (info: VMTraceStep) => void
   /** 最多记录多少步；默认 Infinity。到上限后停止回调，程序继续跑 */
@@ -118,6 +121,7 @@ export class VirtualMachine {
   private output: (text: string) => void
   private clock: () => number
   private loopBudget: number
+  private maxRangeLength: number
   private loops = 0
   private trace?: VMOptions['trace']
   private traceLimit: number
@@ -127,9 +131,10 @@ export class VirtualMachine {
     this.output = options.output ?? (() => {})
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.loopBudget = options.loopBudget ?? DEFAULT_LOOP_BUDGET
+    this.maxRangeLength = options.maxRangeLength ?? DEFAULT_MAX_RANGE_LENGTH
     this.trace = options.trace
     this.traceLimit = options.traceLimit ?? Infinity
-    for (const native of createBuiltins(this.output, this.clock, options.readLine ?? null)) {
+    for (const native of createBuiltins(this.output, this.clock, options.readLine ?? null, this.maxRangeLength)) {
       this.globals.set(native.name, native)
     }
   }

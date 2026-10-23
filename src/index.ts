@@ -4,7 +4,7 @@ import { parse, ParseError } from './parser'
 import { ResolveError, resolve } from './resolver'
 import { compile, FunctionCompiler } from './compiler'
 import { disassemble, disassembleRows, type DisasmRow, type VMFunction } from './chunk'
-import { ThrowSignal, uncaughtThrowMessage } from './values'
+import { ThrowSignal, uncaughtThrowMessage, outputLimitMessage } from './values'
 import { VirtualMachine } from './vm'
 import type { VMOptions, VMTraceStep } from './vm'
 import type { ReadLine } from './builtins'
@@ -41,11 +41,38 @@ export interface RunOptions {
   readLine?: ReadLine
   /** 循环轮数预算：宿主按自己能容忍的卡顿时长决定，两个后端拿同一个数 */
   loopBudget?: number
+  /**
+   * print 次数上限；不设则不限。超限后 print 抛一条可被 catch 的运行时错误，
+   * 且本轮内不再放行新的输出——宿主收集输出的数组不会无限膨胀。
+   */
+  maxOutputLines?: number
+  /** range() 单次最多分配的元素个数；默认 DEFAULT_MAX_RANGE_LENGTH */
+  maxRangeLength?: number
   /** 字节码 VM 的逐指令轨迹回调；树遍历后端忽略 */
   trace?: VMOptions['trace']
   /** 轨迹最多记录多少步；树遍历后端忽略 */
   traceLimit?: number
 }
+
+/**
+ * print 次数闸门：包在宿主 sink 外面，两个后端与两类会话共用，
+ * 计数语义才和错误文案一起保持唯一。
+ */
+function createOutputGate(sink: (text: string) => void, limit?: number) {
+  let count = 0
+  return {
+    emit(text: string): void {
+      if (limit !== undefined && count >= limit) throw new RuntimeError(outputLimitMessage(limit))
+      count += 1
+      sink(text)
+    },
+    reset(): void {
+      count = 0
+    },
+  }
+}
+
+type OutputGate = ReturnType<typeof createOutputGate>
 
 /**
  * 运行一段 Cha 源码。词法 → 解析 → 作用域解析 → 求值，
@@ -55,15 +82,17 @@ export interface RunOptions {
 export function run(source: string, options: RunOptions = {}): RunResult {
   const output: string[] = []
   const sink = options.output ?? ((text: string) => output.push(text))
+  const gate = createOutputGate(sink, options.maxOutputLines)
 
   try {
     const program = parse(source)
     const resolutions = resolve(program)
     const interpreter = new Interpreter(resolutions, {
-      output: sink,
+      output: gate.emit,
       clock: options.clock,
       readLine: options.readLine,
       loopBudget: options.loopBudget,
+      maxRangeLength: options.maxRangeLength,
     })
     interpreter.run(program)
     return { output }
@@ -126,12 +155,18 @@ function stripPosition(message: string): string {
  */
 export class Session {
   private interpreter: Interpreter
+  private gate: OutputGate
 
   constructor(options: RunOptions = {}) {
-    this.interpreter = new Interpreter(new Map(), options)
+    this.gate = createOutputGate(options.output ?? (() => {}), options.maxOutputLines)
+    this.interpreter = new Interpreter(new Map(), {
+      ...options,
+      output: this.gate.emit,
+    })
   }
 
   run(source: string): RunResult {
+    this.gate.reset()
     try {
       const program = parse(source)
       this.interpreter.addResolutions(resolve(program))
@@ -150,16 +185,18 @@ export class Session {
 export function runVM(source: string, options: RunOptions = {}): RunResult {
   const output: string[] = []
   const sink = options.output ?? ((text: string) => output.push(text))
+  const gate = createOutputGate(sink, options.maxOutputLines)
 
   try {
     const program = parse(source)
     resolve(program) // 编译期错误（重复声明、自引用等）与 run() 同相位
     const proto = compile(program)
     const vm = new VirtualMachine({
-      output: sink,
+      output: gate.emit,
       clock: options.clock,
       readLine: options.readLine,
       loopBudget: options.loopBudget,
+      maxRangeLength: options.maxRangeLength,
       trace: options.trace,
       traceLimit: options.traceLimit,
     })
@@ -177,19 +214,22 @@ export function runVM(source: string, options: RunOptions = {}): RunResult {
 export class VMSession {
   private vm: VirtualMachine
   private buffer: string[] = []
+  private gate: OutputGate
 
   constructor(options: RunOptions = {}) {
+    this.gate = createOutputGate((text) => {
+      this.buffer.push(text)
+      options.output?.(text)
+    }, options.maxOutputLines)
     this.vm = new VirtualMachine({
       ...options,
-      output: (text) => {
-        this.buffer.push(text)
-        options.output?.(text)
-      },
+      output: this.gate.emit,
     })
   }
 
   run(source: string): RunResult {
     this.buffer = []
+    this.gate.reset()
     try {
       const program = parse(source)
       resolve(program)

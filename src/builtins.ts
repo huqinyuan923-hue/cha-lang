@@ -5,8 +5,10 @@
 import { RuntimeError } from './values'
 import {
   ChaMap,
+  DEFAULT_MAX_RANGE_LENGTH,
   formatValue,
   inspectValue,
+  rangeLimitMessage,
   typeName,
   valuesEqual,
   type NativeFunction,
@@ -19,7 +21,8 @@ export type ReadLine = (prompt: string | null) => string | null
 export function createBuiltins(
   output: (text: string) => void,
   clock: () => number,
-  readLine: ReadLine | null = null
+  readLine: ReadLine | null = null,
+  maxRangeLength = DEFAULT_MAX_RANGE_LENGTH
 ): NativeFunction[] {
   const native = (
     name: string,
@@ -104,9 +107,20 @@ export function createBuiltins(
         throw new RuntimeError('range() 需要 1~3 个参数')
       }
       if (step === 0) throw new RuntimeError('range() 的步长不能为 0')
+      // 分配前按跨度估算：Infinity / 超大区间在这里就拦住，不等内存涨爆。
+      // NaN 估算结果为 NaN（比较为 false），保持原来「空数组」的语义。
+      const span = step > 0 ? stop - start : start - stop
+      if (Math.ceil(span / Math.abs(step)) > maxRangeLength) {
+        throw new RuntimeError(rangeLimitMessage(maxRangeLength))
+      }
       const out: Value[] = []
-      if (step > 0) for (let i = start; i < stop; i += step) out.push(i)
-      else for (let i = start; i > stop; i += step) out.push(i)
+      // 浮点步长可能比估算多走一步（0.1 累加不到 1），落盘时再兜一次硬上限
+      const take = (v: Value): void => {
+        if (out.length >= maxRangeLength) throw new RuntimeError(rangeLimitMessage(maxRangeLength))
+        out.push(v)
+      }
+      if (step > 0) for (let i = start; i < stop; i += step) take(i)
+      else for (let i = start; i > stop; i += step) take(i)
       return out
     }),
     native('split', 2, (args) => {

@@ -5,6 +5,7 @@ import {
   ChaInstance,
   ChaMap,
   DEFAULT_LOOP_BUDGET,
+  DEFAULT_MAX_RANGE_LENGTH,
   Environment,
   MAX_CALL_DEPTH,
   RuntimeError,
@@ -57,6 +58,8 @@ export interface InterpreterOptions {
   readLine?: ReadLine | null
   /** 循环轮数预算，与 VM 同一语义（数循环体进了多少轮） */
   loopBudget?: number
+  /** range() 单次最多分配的元素个数；默认 DEFAULT_MAX_RANGE_LENGTH */
+  maxRangeLength?: number
 }
 
 type Resolutions = Map<Expr, number>
@@ -72,6 +75,7 @@ export class Interpreter {
   /** 已执行的循环轮数，与 VM 的 LOOP 回跳一一对应 */
   private loops = 0
   private loopBudget: number
+  private maxRangeLength: number
   /** 用 WeakMap 累积：会话里早先声明的函数体还活着，它们的解析结果就不能丢 */
   private resolutions = new WeakMap<Expr, number>()
 
@@ -81,6 +85,7 @@ export class Interpreter {
     this.clock = options.clock ?? (() => Date.now() / 1000)
     this.readLine = options.readLine ?? null
     this.loopBudget = options.loopBudget ?? DEFAULT_LOOP_BUDGET
+    this.maxRangeLength = options.maxRangeLength ?? DEFAULT_MAX_RANGE_LENGTH
     this.installBuiltins()
   }
 
@@ -623,7 +628,7 @@ export class Interpreter {
 
   private installBuiltins(): void {
     // 内建实现抽到 builtins.ts，与字节码 VM 共用同一份
-    for (const builtin of createBuiltins(this.output, this.clock, this.readLine)) {
+    for (const builtin of createBuiltins(this.output, this.clock, this.readLine, this.maxRangeLength)) {
       this.globals.declare(builtin.name, builtin)
     }
   }
