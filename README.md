@@ -342,3 +342,7 @@ pnpm test:watch  # 开发模式
 ## 许可证
 
 [MIT](LICENSE) © 2026 huqinyuan923-hue
+
+## 🌌 这门语言在星图上
+
+Cha 是 [ADCakeyuan 星系](https://status.adcakeyuan.top) 中的一颗行星——浏览器 Playground 的在线状态、仓库遥测都实时显示在星图上。去 [GitHub Wrapped](https://wrapped.adcakeyuan.top) 生成年度报告，或到 [AI 小镇](https://town.adcakeyuan.top) 和读过本 README 的 AI 居民聊聊这门语言。
