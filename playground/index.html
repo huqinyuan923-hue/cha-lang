@@ -7,6 +7,24 @@
 <meta name="description" content="Cha（茶）是用 TypeScript 从零手写的微型编程语言：手写词法分析器、递归下降解析器、树遍历解释器与字节码栈式虚拟机。浏览器内即可编辑运行、切换双后端并查看字节码。" />
 <meta name="theme-color" content="#14120f" />
 <meta name="color-scheme" content="dark" />
+<style>
+  /* 进站动画：编译装载（每会话一次） */
+  #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#14120f;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;animation:chOut .5s ease 2s forwards}
+  #boot .c-logo{color:#e7e6f5;font-size:clamp(28px,5vw,48px);font-weight:800;letter-spacing:.05em}
+  #boot .c-logo em{font-style:normal;color:#c4b5fd}
+  #boot .c-hex{display:flex;gap:10px;font-size:14px;color:#7c6f9f;min-height:1.4em}
+  #boot .c-hex span{opacity:0;animation:chHex .25s ease both}
+  #boot .c-hex span:nth-child(1){animation-delay:.3s}
+  #boot .c-hex span:nth-child(2){animation-delay:.45s}
+  #boot .c-hex span:nth-child(3){animation-delay:.6s}
+  #boot .c-hex span:nth-child(4){animation-delay:.75s}
+  #boot .c-hex span:nth-child(5){animation-delay:.9s}
+  #boot .c-hex span:nth-child(6){animation-delay:1.05s}
+  #boot .c-status{font-size:12px;letter-spacing:.15em;color:#a3e635;opacity:0;animation:chHex .3s ease 1.3s both}
+  @keyframes chHex{from{opacity:0;transform:translateY(6px)}}
+  @keyframes chOut{to{opacity:0;visibility:hidden;transform:scale(1.03)}}
+  @media (prefers-reduced-motion:reduce){#boot{display:none}}
+</style>
 <link rel="canonical" href="https://cha.adcakeyuan.top/" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Cha Playground" />
@@ -125,6 +143,12 @@
 </style>
 </head>
 <body>
+<div id="boot" aria-hidden="true">
+  <div class="c-logo">Cha（茶）<em>Playground</em></div>
+  <div class="c-hex"><span>0x4348</span><span>0x41A1</span><span>0x7F3B</span><span>0x02EC</span><span>0xB4D9</span><span>0xFF00</span></div>
+  <div class="c-status">&gt; bytecode VM loaded · READY</div>
+</div>
+<script>try{if(sessionStorage.getItem('boot-seen')){var b=document.getElementById('boot');b&&(b.style.display='none')}else{sessionStorage.setItem('boot-seen','1')}}catch(e){}</script>
 <noscript><p class="noscript">这个 Playground 需要 JavaScript 才能运行 Cha 编译器——请在浏览器设置中开启后刷新页面。</p></noscript>
 <header>
   <h1>茶 ☕ Playground</h1>
