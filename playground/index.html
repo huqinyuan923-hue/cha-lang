@@ -9,9 +9,9 @@
 <meta name="color-scheme" content="dark" />
 <style>
   /* 进站动画：编译装载（每会话一次） */
-  #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#14120f;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;animation:chOut .5s ease 2s forwards}
-  #boot .c-logo{color:#e7e6f5;font-size:clamp(28px,5vw,48px);font-weight:800;letter-spacing:.05em}
-  #boot .c-logo em{font-style:normal;color:#c4b5fd}
+  #boot{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(ellipse 80% 55% at 50% 30%,rgba(167,139,250,.12),transparent),#14120f;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;animation:chOut .5s cubic-bezier(.65,0,.35,1) 2.6s forwards}
+  #boot .c-logo{font-size:clamp(28px,5vw,48px);font-weight:800;letter-spacing:.05em;background:linear-gradient(100deg,#e7e6f5,#c4b5fd 55%,#a3e635);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #boot .c-logo em{font-style:normal}
   #boot .c-hex{display:flex;gap:10px;font-size:14px;color:#7c6f9f;min-height:1.4em}
   #boot .c-hex span{opacity:0;animation:chHex .25s ease both}
   #boot .c-hex span:nth-child(1){animation-delay:.3s}
@@ -20,9 +20,12 @@
   #boot .c-hex span:nth-child(4){animation-delay:.75s}
   #boot .c-hex span:nth-child(5){animation-delay:.9s}
   #boot .c-hex span:nth-child(6){animation-delay:1.05s}
-  #boot .c-status{font-size:12px;letter-spacing:.15em;color:#a3e635;opacity:0;animation:chHex .3s ease 1.3s both}
-  @keyframes chHex{from{opacity:0;transform:translateY(6px)}}
-  @keyframes chOut{to{opacity:0;visibility:hidden;transform:scale(1.03)}}
+  #boot .c-bar{width:min(260px,60vw);height:3px;border-radius:999px;overflow:hidden;background:rgba(196,181,253,.16);opacity:0;animation:chHex .3s ease 1.2s both}
+  #boot .c-bar::before{content:'';display:block;height:100%;background:linear-gradient(90deg,#c4b5fd,#a3e635);transform:scaleX(0);transform-origin:left;animation:chFill 1.2s cubic-bezier(.3,0,.4,1) 1.3s forwards}
+  #boot .c-status{font-size:12px;letter-spacing:.15em;color:#a3e635;opacity:0;animation:chHex .3s ease 1.65s both}
+  @keyframes chHex{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  @keyframes chFill{to{transform:scaleX(1)}}
+  @keyframes chOut{to{opacity:0;visibility:hidden;transform:scale(1.04)}}
   @media (prefers-reduced-motion:reduce){#boot{display:none}}
 </style>
 <link rel="canonical" href="https://cha.adcakeyuan.top/" />
@@ -146,6 +149,7 @@
 <div id="boot" aria-hidden="true">
   <div class="c-logo">Cha（茶）<em>Playground</em></div>
   <div class="c-hex"><span>0x4348</span><span>0x41A1</span><span>0x7F3B</span><span>0x02EC</span><span>0xB4D9</span><span>0xFF00</span></div>
+  <div class="c-bar"></div>
   <div class="c-status">&gt; bytecode VM loaded · READY</div>
 </div>
 <script>try{if(sessionStorage.getItem('boot-seen')){var b=document.getElementById('boot');b&&(b.style.display='none')}else{sessionStorage.setItem('boot-seen','1')}}catch(e){}</script>
